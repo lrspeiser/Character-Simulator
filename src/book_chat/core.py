@@ -330,6 +330,12 @@ class Conversation:
                 logger.warning("Narrator couldn't choose a speaker. Ending conversation.")
                 break
             
+            # Wait for user to press space before continuing
+            if self.gui and turn > 0:
+                self.gui.wait_for_space()
+                if self.gui.is_quit_requested():
+                    break
+            
             # Narrator describes the scene before character speaks
             if turn > 0:  # Skip scene description on first turn
                 if self.gui:

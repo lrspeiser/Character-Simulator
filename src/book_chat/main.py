@@ -44,6 +44,13 @@ def main():
     # Load configuration
     config = load_config(config_path)
     
+    # Set logging level based on config (quiet mode for GUI)
+    if config.get("use_gui", True) and not config.get("verbose", False):
+        # Quiet mode: only show warnings and errors
+        logging.getLogger().setLevel(logging.WARNING)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.WARNING)
+    
     # Initialize Claude client
     model = config.get("model", "claude-sonnet-4-20250514")
     client = ClaudeClient(model=model)

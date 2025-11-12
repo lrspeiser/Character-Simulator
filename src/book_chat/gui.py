@@ -21,11 +21,16 @@ class ChatWindow:
         """
         self.root = tk.Tk()
         self.root.title(title)
-        self.root.geometry("900x700")
+        self.root.geometry("1000x800")
+        
+        # Set minimum window size
+        self.root.minsize(800, 600)
         
         # Message queue for thread-safe updates
         self.message_queue = queue.Queue()
         self.quit_requested = False
+        self.paused = True  # Start paused, waiting for first spacebar press
+        self.space_pressed = False
         
         # Color scheme for different speakers
         self.colors = {
@@ -37,7 +42,12 @@ class ChatWindow:
         }
         
         self._setup_ui()
+        self._setup_keybindings()
         self._start_message_processor()
+    
+    def _setup_keybindings(self):
+        """Set up keyboard shortcuts."""
+        self.root.bind('<space>', self._on_space_pressed)
     
     def _setup_ui(self):
         """Set up the UI components."""
@@ -62,8 +72,10 @@ class ChatWindow:
             wrap=tk.WORD,
             state=tk.DISABLED,
             bg='white',
-            font=('Helvetica', 12),
-            relief=tk.FLAT
+            font=('Arial', 14),
+            relief=tk.FLAT,
+            padx=10,
+            pady=10
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True)
         
@@ -73,27 +85,26 @@ class ChatWindow:
             self.chat_display.tag_config(
                 tag_name,
                 background=color,
-                spacing1=5,
-                spacing3=5,
-                lmargin1=10,
-                lmargin2=10,
-                rmargin=10,
-                borderwidth=1,
-                relief=tk.SOLID
+                spacing1=8,
+                spacing3=8,
+                lmargin1=15,
+                lmargin2=15,
+                rmargin=15,
+                borderwidth=0
             )
         
         # Speaker name tag (bold)
         self.chat_display.tag_config(
             'speaker_name',
-            font=('Helvetica', 12, 'bold'),
-            foreground='#333333'
+            font=('Arial', 14, 'bold'),
+            foreground='#1a1a1a'
         )
         
         # Narrator text style (italic)
         self.chat_display.tag_config(
             'narrator_text',
-            font=('Helvetica', 12, 'italic'),
-            foreground='#555555'
+            font=('Arial', 13, 'italic'),
+            foreground='#444444'
         )
         
         # Bottom button frame
@@ -118,10 +129,10 @@ class ChatWindow:
         # Status label
         self.status_label = tk.Label(
             button_frame,
-            text="Conversation in progress...",
+            text="Press SPACE to continue...",
             bg='white',
-            fg='#666666',
-            font=('Helvetica', 10)
+            fg='#2196F3',
+            font=('Helvetica', 11, 'bold')
         )
         self.status_label.pack(side=tk.LEFT)
     
@@ -160,16 +171,16 @@ class ChatWindow:
         
         self.chat_display.config(state=tk.NORMAL)
         
-        # Add spacing
+        # Add spacing between bubbles
         if self.chat_display.index('end-1c') != '1.0':
-            self.chat_display.insert(tk.END, '\n')
+            self.chat_display.insert(tk.END, '\n\n')
         
         # Store starting position
         self.current_bubble_start = self.chat_display.index('end-1c')
         
         # Add speaker name (if not narrator)
         if speaker != 'narrator':
-            self.chat_display.insert(tk.END, f"{speaker} said:\n", 'speaker_name')
+            self.chat_display.insert(tk.END, f"{speaker}:\n", 'speaker_name')
         
         self.chat_display.config(state=tk.DISABLED)
     
@@ -243,6 +254,12 @@ class ChatWindow:
         """Update the status label."""
         self.message_queue.put(('status', {'text': text}))
     
+    def _on_space_pressed(self, event=None):
+        """Handle spacebar press to advance conversation."""
+        self.space_pressed = True
+        self.paused = False
+        self.update_status("Processing...")
+    
     def _on_quit(self):
         """Handle quit button click."""
         self.quit_requested = True
@@ -251,6 +268,22 @@ class ChatWindow:
     def is_quit_requested(self) -> bool:
         """Check if user requested to quit."""
         return self.quit_requested
+    
+    def wait_for_space(self):
+        """Block until user presses space."""
+        self.space_pressed = False
+        self.paused = True
+        self.update_status("Press SPACE to continue...")
+        
+        # Wait for space press
+        while not self.space_pressed and not self.quit_requested:
+            self.root.update()
+            import time
+            time.sleep(0.05)
+    
+    def is_paused(self) -> bool:
+        """Check if conversation is paused."""
+        return self.paused
     
     def run(self):
         """Start the GUI main loop."""

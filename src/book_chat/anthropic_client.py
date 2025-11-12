@@ -10,9 +10,9 @@ import logging
 from typing import List, Dict, Any, Optional
 from anthropic import Anthropic
 
-# Configure verbose logging
+# Configure logging (default to INFO, can be overridden)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
