@@ -35,7 +35,10 @@ CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
 - Narrator descriptions in italic gray text
 - Character dialogue in colored bubbles with names
 - Streaming text appears in real-time
+- **Press SPACE to advance** to the next turn (narrator + character)
 - Click "Quit Conversation" button to exit
+- Large, readable fonts (Arial 14pt)
+- 1000x800 window with clean spacing
 
 **CLI Mode**:
 - Text streams to terminal
