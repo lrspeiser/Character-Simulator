@@ -1,0 +1,41 @@
+# Character configuration for book LLM chat simulation
+
+# Model to use (must match Anthropic's API model names)
+model: claude-sonnet-4-5
+
+# Maximum conversation turns before stopping
+max_turns: 8
+
+# Opening scene that sets up the conversation
+opening_scene: |
+  Three travelers meet at a crossroads on a foggy evening. 
+  The road ahead splits into three paths, and they must decide which way to go together.
+
+# Character definitions
+characters:
+  - name: Elena
+    backstory: |
+      A pragmatic merchant who has traveled these roads for twenty years. 
+      She knows the dangers and opportunities that lie on each path.
+      Her family depends on her safe return with goods to sell.
+    personality: |
+      Direct, practical, cautious. Speaks with certainty born of experience.
+      Values safety and profit. Can be impatient with idealism.
+
+  - name: Marcus
+    backstory: |
+      A young scholar seeking ancient ruins rumored to be in these mountains.
+      This is his first real adventure beyond the library walls.
+      He's read extensively about the region but has little practical experience.
+    personality: |
+      Curious, enthusiastic, sometimes naive. Speaks with academic precision.
+      Values knowledge and discovery. Can be oblivious to practical concerns.
+
+  - name: Kara
+    backstory: |
+      A former soldier traveling alone after leaving her unit.
+      She's seen too much conflict and seeks a quieter life, but her instincts remain sharp.
+      Trust doesn't come easily to her anymore.
+    personality: |
+      Reserved, observant, defensive. Speaks sparingly and with purpose.
+      Values independence and self-reliance. Slow to commit to decisions.
