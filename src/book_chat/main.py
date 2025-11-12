@@ -107,16 +107,29 @@ def main():
             gui_window=gui
         )
         
-        # Run conversation in separate thread
+        # Run conversation in separate thread with error handling
         def run_conversation():
-            conversation.start(max_turns=max_turns)
-            gui.close()
+            try:
+                conversation.start(max_turns=max_turns)
+            except Exception as e:
+                import traceback
+                error_msg = f"Error in conversation: {e}\n{traceback.format_exc()}"
+                print(error_msg)
+                logging.error(error_msg)
+                gui.update_status(f"Error: {str(e)}")
+            finally:
+                gui.close()
         
         conversation_thread = threading.Thread(target=run_conversation, daemon=True)
         conversation_thread.start()
         
         # Run GUI main loop (blocks until window closes)
-        gui.run()
+        try:
+            gui.run()
+        except Exception as e:
+            import traceback
+            print(f"GUI Error: {e}\n{traceback.format_exc()}")
+            logging.error(f"GUI Error: {e}\n{traceback.format_exc()}")
     else:
         # CLI mode
         conversation = Conversation(

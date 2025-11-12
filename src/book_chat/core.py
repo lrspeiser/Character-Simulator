@@ -184,10 +184,17 @@ class Narrator:
         # Ask narrator to choose
         character_names = ", ".join([c.name for c in characters])
         system_prompt = (
-            f"{self.guide}\n\n"
-            f"The following characters want to speak: {character_names}\n"
-            f"Based on the conversation flow and dramatic tension, who should speak next?\n"
-            f"Respond with ONLY the name of the character who should speak."
+            f"The following characters want to speak: {character_names}\n\n"
+            f"Who should speak next based on dramatic tension and story flow?\n\n"
+            f"CRITICAL: Respond with ONLY the character's name. Nothing else.\n"
+            f"Do NOT include dialogue, colons, or explanations.\n\n"
+            f"CORRECT: Dr. Sarah Chen\n"
+            f"CORRECT: Marcus Webb\n"
+            f"CORRECT: Victoria Reeves\n\n"
+            f"WRONG: Marcus Webb: \"Jesus Christ...\"\n"
+            f"WRONG: Dr. Sarah Chen speaks next\n"
+            f"WRONG: I think Marcus Webb should go\n\n"
+            f"Respond with just the name:"
         )
         
         try:
@@ -198,15 +205,28 @@ class Narrator:
                 stream=False
             )
             
-            # Find matching character
+            # Clean the response - remove any quotes, colons, dialogue
             choice_name = choice.strip()
+            # Remove anything after a colon (in case narrator added dialogue)
+            if ':' in choice_name:
+                choice_name = choice_name.split(':')[0].strip()
+            # Remove quotes
+            choice_name = choice_name.strip('"\'')
+            
+            # Find matching character (exact match first)
             for character in characters:
-                if character.name.lower() in choice_name.lower():
-                    logger.info(f"Narrator chose: {character.name}")
+                if character.name.lower() == choice_name.lower():
+                    logger.info(f"Narrator chose (exact): {character.name}")
+                    return character
+            
+            # Try partial match
+            for character in characters:
+                if character.name.lower() in choice_name.lower() or choice_name.lower() in character.name.lower():
+                    logger.info(f"Narrator chose (partial): {character.name}")
                     return character
             
             # Default to first if no match
-            logger.warning(f"Narrator choice '{choice_name}' didn't match, defaulting to {characters[0].name}")
+            logger.warning(f"Narrator choice '{choice_name}' didn't match any character, defaulting to {characters[0].name}")
             return characters[0]
             
         except Exception as e:
