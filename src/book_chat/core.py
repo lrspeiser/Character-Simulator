@@ -5,6 +5,7 @@ Core logic for character-based conversation simulation.
 import logging
 import sys
 import select
+import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from .anthropic_client import ClaudeClient
@@ -13,6 +14,19 @@ logger = logging.getLogger(__name__)
 
 # Token limit for conversation history
 MAX_HISTORY_TOKENS = 20000
+
+
+def parse_json_response(response: str, fallback_key: str = None) -> dict:
+    """Parse JSON response with fallback to plain text."""
+    try:
+        # Try to parse as JSON
+        data = json.loads(response.strip())
+        return data
+    except json.JSONDecodeError:
+        # If not JSON, return as fallback key
+        if fallback_key:
+            return {fallback_key: response.strip()}
+        return {"text": response.strip()}
 
 
 class Character:
@@ -56,7 +70,9 @@ class Character:
             f"✗ \"Marcus, what triggered the lockdown?\" I stand up from the table.\n"
             f"✗ *crosses arms* \"Are you suggesting I did this?\"\n"
             f"✗ My voice gets sharper. \"Are you suggesting I did this?\"\n\n"
-            f"Respond with 1-3 sentences of pure spoken dialogue as {self.name}."
+            f"Respond with 1-3 sentences of pure spoken dialogue as {self.name}.\n\n"
+            f"FORMAT: Respond with JSON in this exact format:\n"
+            f'{{"dialogue": "your spoken words here"}}'
         )
     
     def wants_to_respond(self, conversation_history: List[Dict[str, str]]) -> bool:
@@ -131,8 +147,12 @@ class Character:
             stream_callback=stream_callback
         )
         
-        logger.info(f"{self.name} responded: {response}")
-        return response
+        # Parse JSON response
+        parsed = parse_json_response(response, fallback_key="dialogue")
+        dialogue = parsed.get("dialogue", response)
+        
+        logger.info(f"{self.name} responded: {dialogue}")
+        return dialogue
 
 
 class Narrator:
@@ -182,36 +202,30 @@ class Narrator:
         logger.info(f"Multiple characters want to respond: {[c.name for c in characters]}")
         
         # Ask narrator to choose
-        character_names = ", ".join([c.name for c in characters])
+        character_names = [c.name for c in characters]
         system_prompt = (
-            f"The following characters want to speak: {character_names}\n\n"
+            f"The following characters want to speak: {', '.join(character_names)}\n\n"
             f"Who should speak next based on dramatic tension and story flow?\n\n"
-            f"CRITICAL: Respond with ONLY the character's name. Nothing else.\n"
-            f"Do NOT include dialogue, colons, or explanations.\n\n"
-            f"CORRECT: Dr. Sarah Chen\n"
-            f"CORRECT: Marcus Webb\n"
-            f"CORRECT: Victoria Reeves\n\n"
-            f"WRONG: Marcus Webb: \"Jesus Christ...\"\n"
-            f"WRONG: Dr. Sarah Chen speaks next\n"
-            f"WRONG: I think Marcus Webb should go\n\n"
-            f"Respond with just the name:"
+            f"FORMAT: Respond with JSON in this exact format:\n"
+            f'{{"next_speaker": "Character Name"}}\n\n'
+            f"CORRECT examples:\n"
+            f'{{"next_speaker": "Dr. Sarah Chen"}}\n'
+            f'{{"next_speaker": "Marcus Webb"}}\n'
+            f'{{"next_speaker": "Victoria Reeves"}}\n\n'
+            f"The next_speaker value must be EXACTLY one of: {', '.join(character_names)}"
         )
         
         try:
             choice = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
-                max_tokens=20,
+                max_tokens=50,
                 stream=False
             )
             
-            # Clean the response - remove any quotes, colons, dialogue
-            choice_name = choice.strip()
-            # Remove anything after a colon (in case narrator added dialogue)
-            if ':' in choice_name:
-                choice_name = choice_name.split(':')[0].strip()
-            # Remove quotes
-            choice_name = choice_name.strip('"\'')
+            # Parse JSON response
+            parsed = parse_json_response(choice, fallback_key="next_speaker")
+            choice_name = parsed.get("next_speaker", choice).strip()
             
             # Find matching character (exact match first)
             for character in characters:
@@ -295,20 +309,26 @@ class Narrator:
             f"- Tension, mood shifts, or dramatic moments\n\n"
             f"Example: \"Webb's hand moves to his holster. The lights flicker, and Chen's eyes dart to the door.\"\n"
             f"NOT: Webb says, \"We need to talk.\" or Marcus Webb: or Webb thinks about the situation.\n\n"
-            f"Keep it vivid, cinematic, and concise. Only narrate - never speak as any character."
+            f"Keep it vivid, cinematic, and concise. Only narrate - never speak as any character.\n\n"
+            f"FORMAT: Respond with JSON in this exact format:\n"
+            f'{{"scene": "your scene description here"}}'
         )
         
         try:
             description = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
-                max_tokens=150,
+                max_tokens=200,
                 stream=True,
                 stream_callback=stream_callback
             )
             
-            logger.info(f"Narrator description: {description}")
-            return description
+            # Parse JSON response
+            parsed = parse_json_response(description, fallback_key="scene")
+            scene_text = parsed.get("scene", description)
+            
+            logger.info(f"Narrator description: {scene_text}")
+            return scene_text
             
         except Exception as e:
             logger.error(f"Error generating scene description: {e}")
