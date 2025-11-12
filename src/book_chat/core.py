@@ -42,10 +42,15 @@ class Character:
         """Build the system prompt for this character."""
         return (
             f"{self.backstory}\n\n"
-            f"Respond as {self.name} would, based on your backstory and personality. "
-            f"Keep responses natural and conversational (1-3 sentences typically). "
-            f"Only speak as {self.name} - do not narrate or speak for other characters. "
-            f"Do not use asterisks or action descriptions - only dialogue."
+            f"CRITICAL RULES:\n"
+            f"1. You may ONLY speak dialogue - the actual words {self.name} says out loud\n"
+            f"2. NO action descriptions, NO body language, NO scene setting\n"
+            f"3. NO asterisks, NO parentheticals, NO stage directions\n"
+            f"4. Do NOT describe what you're doing, thinking, or feeling - just speak\n"
+            f"5. The narrator handles all descriptions - you only handle spoken words\n\n"
+            f"Respond as {self.name} would say it, using 1-3 sentences of pure dialogue.\n"
+            f"Example: \"I need answers, Marcus. What exactly happened on Level 3?\"\n"
+            f"NOT: *crosses arms* \"I need answers.\" or I say firmly, \"I need answers.\""
         )
     
     def wants_to_respond(self, conversation_history: List[Dict[str, str]]) -> bool:
@@ -100,7 +105,7 @@ class Character:
         response = self.client.send_message(
             system_prompt=system_prompt,
             messages=conversation_history,
-            max_tokens=500,
+            max_tokens=300,
             stream=True,
             prefix=f"\n{self.name}: " if not stream_callback else None,
             stream_callback=stream_callback
@@ -205,19 +210,25 @@ class Narrator:
         
         system_prompt = (
             f"{self.guide}\n\n"
-            f"You are the narrator. {last_speaker} just spoke.\n"
-            f"Briefly describe what happens next (1-2 sentences):\n"
-            f"- Body language, facial expressions, or actions\n"
+            f"You are the narrator. {last_speaker} just spoke.\n\n"
+            f"CRITICAL RULES:\n"
+            f"1. You may ONLY provide scene description and narration\n"
+            f"2. NO dialogue in quotes - characters speak for themselves\n"
+            f"3. NO \"he said\" or \"she replied\" - just describe the scene\n\n"
+            f"Describe what happens next (1-2 sentences):\n"
+            f"- Body language, facial expressions, physical actions\n"
             f"- Environmental details (sounds, lighting, atmosphere)\n"
-            f"- Tension or mood shifts\n\n"
-            f"Keep it vivid but concise. Only narrate - do not speak as any character."
+            f"- Tension, mood shifts, or dramatic moments\n\n"
+            f"Example: \"Webb's hand moves to his holster. The lights flicker, and Chen's eyes dart to the door.\"\n"
+            f"NOT: Webb says, \"We need to talk.\" or Webb thinks about the situation.\n\n"
+            f"Keep it vivid, cinematic, and concise. Only narrate - never speak as any character."
         )
         
         try:
             description = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
-                max_tokens=200,
+                max_tokens=150,
                 stream=True,
                 stream_callback=stream_callback
             )
