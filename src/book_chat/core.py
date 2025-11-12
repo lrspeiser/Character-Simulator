@@ -304,7 +304,6 @@ class Conversation:
         # Check if input is available (non-blocking)
         if sys.platform != 'win32':
             # Unix-like systems
-            import sys, select
             if select.select([sys.stdin], [], [], 0.0)[0]:
                 user_input = sys.stdin.readline().strip().upper()
                 if user_input == 'Q':
