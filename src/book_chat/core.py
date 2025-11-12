@@ -196,7 +196,7 @@ class Narrator:
     
     def narrate_scene(self, conversation_history: List[Dict[str, str]], last_speaker: str, stream_callback: Optional[callable] = None) -> str:
         """
-        Generate a brief scene description showing what's happening.
+        Decide if scene description is needed, and generate if so.
         
         Args:
             conversation_history: Conversation so far
@@ -204,8 +204,41 @@ class Narrator:
             stream_callback: Optional callback for streaming to GUI
             
         Returns:
-            Scene description
+            Scene description (or empty string if none needed)
         """
+        logger.info("Checking if scene description needed...")
+        
+        # First, ask if narration is needed
+        decision_prompt = (
+            f"{self.guide}\n\n"
+            f"{last_speaker} just spoke.\n\n"
+            f"Does the scene need narration right now? Answer YES only if:\n"
+            f"- Something important happens physically (actions, reactions, movement)\n"
+            f"- The environment changes (sounds, lights, atmosphere shifts)\n"
+            f"- There's a dramatic moment that needs description\n\n"
+            f"Answer NO if the dialogue flows naturally to the next speaker without needing description.\n\n"
+            f"Answer ONLY with YES or NO."
+        )
+        
+        try:
+            decision = self.client.send_message(
+                system_prompt=decision_prompt,
+                messages=conversation_history,
+                max_tokens=10,
+                stream=False
+            )
+            
+            needs_narration = decision.strip().upper().startswith("YES")
+            logger.info(f"Narration needed: {needs_narration}")
+            
+            if not needs_narration:
+                return ""
+            
+        except Exception as e:
+            logger.error(f"Error checking narration need: {e}")
+            return ""
+        
+        # Generate scene description
         logger.info("Narrator generating scene description...")
         
         system_prompt = (
@@ -214,13 +247,14 @@ class Narrator:
             f"CRITICAL RULES:\n"
             f"1. You may ONLY provide scene description and narration\n"
             f"2. NO dialogue in quotes - characters speak for themselves\n"
-            f"3. NO \"he said\" or \"she replied\" - just describe the scene\n\n"
+            f"3. NO \"he said\" or \"she replied\" - just describe the scene\n"
+            f"4. NO character names followed by colons (e.g. NO 'Marcus Webb:')\n\n"
             f"Describe what happens next (1-2 sentences):\n"
             f"- Body language, facial expressions, physical actions\n"
             f"- Environmental details (sounds, lighting, atmosphere)\n"
             f"- Tension, mood shifts, or dramatic moments\n\n"
             f"Example: \"Webb's hand moves to his holster. The lights flicker, and Chen's eyes dart to the door.\"\n"
-            f"NOT: Webb says, \"We need to talk.\" or Webb thinks about the situation.\n\n"
+            f"NOT: Webb says, \"We need to talk.\" or Marcus Webb: or Webb thinks about the situation.\n\n"
             f"Keep it vivid, cinematic, and concise. Only narrate - never speak as any character."
         )
         
@@ -348,22 +382,26 @@ class Conversation:
                 if self.gui.is_quit_requested():
                     break
             
-            # Narrator describes the scene before character speaks
+            # Narrator decides if scene description is needed
             if turn > 0 and self.last_speaker_name:  # Skip scene description on first turn
-                if self.gui:
-                    self.gui.start_streaming_message('narrator', is_narrator=True)
-                    scene_desc = self.narrator.narrate_scene(
-                        self.history, 
-                        self.last_speaker_name,  # Who spoke LAST time
-                        stream_callback=self.gui.stream_text if self.gui else None
-                    )
-                    self.gui.end_streaming_message()
-                else:
-                    scene_desc = self.narrator.narrate_scene(self.history, self.last_speaker_name)
-                    print(f"\n[{scene_desc}]\n")
+                scene_desc = self.narrator.narrate_scene(
+                    self.history, 
+                    self.last_speaker_name,  # Who spoke LAST time
+                    stream_callback=None  # Don't stream decision-making
+                )
                 
-                # Add scene description to history
+                # Only display and add to history if narrator provided description
                 if scene_desc:
+                    if self.gui:
+                        self.gui.start_streaming_message('narrator', is_narrator=True)
+                        # Stream the scene description
+                        for char in scene_desc:
+                            self.gui.stream_text(char)
+                        self.gui.end_streaming_message()
+                    else:
+                        print(f"\n[{scene_desc}]\n")
+                    
+                    # Add scene description to history
                     self.history.append({
                         "role": "user",
                         "content": f"[Scene: {scene_desc}]"
