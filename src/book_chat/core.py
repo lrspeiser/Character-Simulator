@@ -262,6 +262,7 @@ class Conversation:
         self.client = client
         self.quit_requested = False
         self.gui = gui_window
+        self.last_speaker_name = None  # Track who spoke last
         
         logger.info("Conversation initialized")
         logger.info(f"Characters: {[c.name for c in characters]}")
@@ -348,17 +349,17 @@ class Conversation:
                     break
             
             # Narrator describes the scene before character speaks
-            if turn > 0:  # Skip scene description on first turn
+            if turn > 0 and self.last_speaker_name:  # Skip scene description on first turn
                 if self.gui:
                     self.gui.start_streaming_message('narrator', is_narrator=True)
                     scene_desc = self.narrator.narrate_scene(
                         self.history, 
-                        speaker.name,
+                        self.last_speaker_name,  # Who spoke LAST time
                         stream_callback=self.gui.stream_text if self.gui else None
                     )
                     self.gui.end_streaming_message()
                 else:
-                    scene_desc = self.narrator.narrate_scene(self.history, speaker.name)
+                    scene_desc = self.narrator.narrate_scene(self.history, self.last_speaker_name)
                     print(f"\n[{scene_desc}]\n")
                 
                 # Add scene description to history
@@ -381,6 +382,9 @@ class Conversation:
                 "role": "assistant",
                 "content": f"{speaker.name}: {response}"
             })
+            
+            # Track who spoke for next scene description
+            self.last_speaker_name = speaker.name
             
             # Add user acknowledgment to continue conversation
             self.history.append({
