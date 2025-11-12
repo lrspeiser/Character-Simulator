@@ -20,16 +20,26 @@ cp .env.example .env
 
 ### Running
 ```bash
-# Run the Nexus Labs scenario (default)
+# Run the Nexus Labs scenario with GUI (default)
 python -m src.book_chat.main
 
 # Run with custom config
 CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
 
-# During conversation:
-# - Responses stream character-by-character to the CLI
-# - Type 'Q' and press Enter at any time to quit
+# Run in CLI mode (no GUI)
+# Add use_gui: false to your config YAML
 ```
+
+**GUI Mode** (default):
+- Chat window with colored bubbles for each character
+- Narrator descriptions in italic gray text
+- Character dialogue in colored bubbles with names
+- Streaming text appears in real-time
+- Click "Quit Conversation" button to exit
+
+**CLI Mode**:
+- Text streams to terminal
+- Type 'Q' and press Enter to quit
 
 ## Architecture
 
@@ -41,21 +51,23 @@ CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
 ### Key Files
 - `src/book_chat/anthropic_client.py` - Claude API wrapper with streaming support and token counting
 - `src/book_chat/core.py` - Character, Narrator, and Conversation classes with history management
+- `src/book_chat/gui.py` - tkinter-based chat window with colored bubbles
 - `src/book_chat/main.py` - Entry point, loads config and starts conversation
 - `configs/nexus_labs.yaml` - Nexus Labs scenario configuration
 - `configs/CHARACTER_*_BACKSTORY.txt` - Individual character backstory files
 - `configs/NARRATOR_GUIDE.txt` - Narrator guide with story context and dramatic beats
 
 ### Message Flow
-1. Opening scene added to conversation history
+1. Opening scene added to conversation history and displayed (narrator)
 2. Each turn:
-   - Check for user quit command (Q)
+   - Check for user quit (button click in GUI or 'Q' in CLI)
    - Trim history to 20k token limit (keeps most recent)
    - All characters check if they `wants_to_respond()` via LLM call
    - Narrator's `choose_next_speaker()` decides who speaks (using guide for dramatic tension)
-3. Chosen character's `respond()` generates dialogue (streamed to CLI in real-time)
-4. Response added to history with character name prefix
-5. Cycle continues until max_turns, no responses, or user quits
+3. **Narrator describes the scene** (body language, environment, tension) - streams in italic gray
+4. **Character speaks their dialogue** (only words, no actions) - streams in colored bubble
+5. Both responses added to history
+6. Cycle continues until max_turns, no responses, or user quits
 
 ### API Integration
 - **API Key**: Stored in `.env` as `ANTHROPIC_API_KEY` (see .env.example for setup)
@@ -72,6 +84,7 @@ CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
 Edit config files like `configs/nexus_labs.yaml`:
 - `model`: Claude model to use
 - `max_turns`: Maximum conversation turns (default: 50)
+- `use_gui`: Whether to use GUI (default: true) or CLI mode
 - `opening_scene`: Opening narration that sets the scene
 - `narrator_guide`: Path to narrator guide file
 - `characters`: List with `name` and `backstory_file` for each character
