@@ -22,7 +22,7 @@ def load_config(config_path: str) -> dict:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
-    logger.debug(f"Config loaded: {config}")
+    logger.debug(f"Config loaded")
     return config
 
 
@@ -32,45 +32,59 @@ def main():
     load_dotenv()
     
     # Get config path
-    config_path = os.getenv("CONFIG_PATH", "configs/characters.yaml")
+    config_path = os.getenv("CONFIG_PATH", "configs/nexus_labs.yaml")
     
     if not os.path.exists(config_path):
         print(f"ERROR: Config file not found: {config_path}")
-        print("Create a config file at configs/characters.yaml or set CONFIG_PATH environment variable.")
+        print("Create a config file or set CONFIG_PATH environment variable.")
         sys.exit(1)
     
     # Load configuration
     config = load_config(config_path)
     
     # Initialize Claude client
-    model = config.get("model", "claude-sonnet-4-5")
+    model = config.get("model", "claude-sonnet-4-20250514")
     client = ClaudeClient(model=model)
     
-    # Create characters
+    # Create characters from backstory files
     characters = []
     for char_config in config["characters"]:
+        backstory_file = char_config["backstory_file"]
+        # Make path relative to config directory if not absolute
+        if not os.path.isabs(backstory_file):
+            config_dir = os.path.dirname(config_path)
+            backstory_file = os.path.join(config_dir, backstory_file)
+        
         character = Character(
             name=char_config["name"],
-            backstory=char_config["backstory"],
-            personality=char_config["personality"],
+            backstory_file=backstory_file,
             client=client
         )
         characters.append(character)
     
-    # Create narrator
-    narrator = Narrator(client=client)
+    # Create narrator with guide file
+    narrator_guide = config["narrator_guide"]
+    if not os.path.isabs(narrator_guide):
+        config_dir = os.path.dirname(config_path)
+        narrator_guide = os.path.join(config_dir, narrator_guide)
+    
+    narrator = Narrator(
+        guide_file=narrator_guide,
+        client=client
+    )
     
     # Get opening scene
     opening_scene = config["opening_scene"]
     
     # Get max turns
-    max_turns = config.get("max_turns", 10)
+    max_turns = config.get("max_turns", 50)
     
     # Start conversation
     conversation = Conversation(
         characters=characters,
         narrator=narrator,
-        opening_scene=opening_scene
+        opening_scene=opening_scene,
+        client=client
     )
     
     conversation.start(max_turns=max_turns)

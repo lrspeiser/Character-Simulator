@@ -1,0 +1,31 @@
+# Nexus Labs Lockdown Scenario Configuration
+
+# Model to use (latest Claude)
+model: claude-sonnet-4-20250514
+
+# Maximum conversation turns before stopping
+max_turns: 50
+
+# Opening scene that sets up the conversation
+opening_scene: |
+  The emergency lights cast harsh red shadows across the windowless conference room. Three people are trapped inside—Dr. Sarah Chen, hunched over the table checking her dead phone; Marcus Webb, the security chief who triggered the lockdown, standing with his back to the sealed metal door; and Victoria Reeves, the VP of Operations, sitting perfectly still with her hands folded on the table.
+  
+  The alarm has finally stopped, replaced by an unsettling silence broken only by the hum of ventilation and the occasional beep from the security panel on the wall. The digital clock shows 10:17 PM. The lockdown began 30 minutes ago. No one knows why. No one knows when it will end.
+  
+  Webb's hand rests near his holstered service weapon. Chen keeps glancing at her phone, thinking of her daughter. Reeves maintains her composure, but her knuckles are white.
+  
+  Someone in this room might know more than they're saying. Or someone outside is controlling their fate. Either way, they're stuck here together, and the silence is starting to feel dangerous.
+
+# Narrator guide file
+narrator_guide: NARRATOR_GUIDE.txt
+
+# Character definitions (using backstory files)
+characters:
+  - name: Dr. Sarah Chen
+    backstory_file: CHARACTER_1_BACKSTORY.txt
+  
+  - name: Marcus Webb
+    backstory_file: CHARACTER_2_BACKSTORY.txt
+  
+  - name: Victoria Reeves
+    backstory_file: CHARACTER_3_BACKSTORY.txt

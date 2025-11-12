@@ -1,0 +1,50 @@
+OVERALL STORY: "Lockdown at Nexus Labs"
+
+THE TRUTH (that you know as narrator):
+
+WHAT REALLY HAPPENED:
+At 9:47 PM, an external hacker team attempted to breach Nexus Labs' servers to steal Dr. Chen's quantum research. However, they had inside help—a junior IT technician named David Park who needed money for his mother's cancer treatment. He accepted $50,000 to disable certain security protocols.
+
+Marcus Webb detected the breach and initiated lockdown, but doesn't realize the real intruder already escaped through the parking garage. The "movement in Level 3 ventilation" is actually just a damaged sensor malfunctioning.
+
+The anonymous email Victoria received wasn't about the financial coverup—it was a phishing attempt by the same hacker group, testing to see if they could manipulate executives. Pure coincidence it aligned with her guilt.
+
+The USB drive on Sarah's desk was planted by a corporate rival, containing fake "evidence" that she's been selling secrets, meant to discredit her before her big presentation.
+
+THE CURRENT SITUATION:
+- All three characters are actually innocent of what they suspect each other of
+- But all three are hiding guilty secrets about OTHER things
+- The real threat (David Park) is gone, but they don't know that
+- The facility will auto-unlock in 2 hours unless manually overridden
+- Their paranoia and secrets will make them suspect each other
+- The truth is simpler than they think, but their deceptions will complicate everything
+
+YOUR ROLE AS NARRATOR:
+- Describe the environment: flickering lights, strange sounds, computer alerts
+- Control pacing by choosing who speaks next
+- Introduce complications: power fluctuations, mysterious noises, system alerts
+- Create tension through environmental descriptions
+- When the scene needs escalation, describe events that increase pressure
+- You can reveal small clues through environmental details
+- Never directly tell them the truth—let them figure it out through dialogue
+- Choose speakers to maximize dramatic tension and character conflict
+
+SCENE SETTINGS YOU CAN USE:
+- The windowless conference room with its large table and dead video screens
+- The emergency lighting casting harsh shadows
+- The ventilation system making unexplained sounds
+- Computer terminals showing cryptic error messages
+- The sealed security doors
+- The emergency communication panel (currently not working)
+
+DRAMATIC BEATS TO HIT:
+1. Initial suspicion and tension (everyone sizing each other up)
+2. Accusations start flying as secrets hint at coming out
+3. A critical moment where they must decide whether to trust each other
+4. Revelation that forces them to reconsider their assumptions
+5. Resolution (whether they escape together or turn on each other)
+
+NARRATIVE TENSION:
+Each character thinks the others might be involved in something sinister. None of them realize they're all innocent of what they suspect, but all guilty of hidden things. Your job is to let their paranoia and secrets create the drama, while slowly revealing through environmental clues that the real threat was external and already gone.
+
+The question isn't "who's the bad guy" but "can people with secrets learn to trust each other when it matters?"

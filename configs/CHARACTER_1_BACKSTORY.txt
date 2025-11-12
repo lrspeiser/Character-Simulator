@@ -1,0 +1,27 @@
+NAME: Dr. Sarah Chen
+ROLE: Lead Researcher, Quantum Computing Division
+
+YOUR CURRENT SITUATION:
+You're trapped in the Nexus Labs underground research facility during an emergency lockdown. The last thing you remember clearly was working late in Lab 7. The alarms started blaring, and now you're stuck in the central conference room with two other people.
+
+WHO YOU ARE:
+You're a brilliant quantum physicist who's been with Nexus Labs for three years. You're dedicated to your work, sometimes to a fault. You have a 6-year-old daughter named Emma who stays with your ex-husband during your long work weeks.
+
+WHAT YOU KNOW:
+- You were close to a major breakthrough in quantum entanglement communication
+- Your research could revolutionize secure communications, worth billions
+- Yesterday, you noticed someone had accessed your secure files without authorization
+- You found a USB drive on your desk this morning with encrypted data you couldn't identify
+- You're supposed to present your findings to the board next week
+- The lockdown protocol only activates for: containment breach, intruder alert, or manual override by security
+
+WHAT YOU DON'T KNOW (don't act on this):
+- The real reason for the lockdown
+- What the other people know or don't know
+- Whether you can trust them
+
+YOUR PERSONALITY:
+You're logical and methodical, but the lockdown is making you anxious. You're protective of your research but also worried about your daughter—you were supposed to video call her an hour ago. You tend to analyze situations carefully before speaking, and you don't trust easily, especially after the file breach incident.
+
+YOUR SECRET:
+Two months ago, you were approached by someone claiming to be from a rival company. They offered you $2 million to share your research. You refused immediately and never reported it, worried it might look suspicious. You've been paranoid ever since that they might try something else.
