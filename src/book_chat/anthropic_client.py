@@ -51,7 +51,8 @@ class ClaudeClient:
         messages: List[Dict[str, str]],
         max_tokens: int = 1024,
         stream: bool = False,
-        prefix: Optional[str] = None
+        prefix: Optional[str] = None,
+        stream_callback: Optional[callable] = None
     ) -> str:
         """
         Send a message to Claude and return the response.
@@ -62,6 +63,7 @@ class ClaudeClient:
             max_tokens: Maximum tokens in response
             stream: Whether to stream the response to stdout
             prefix: Optional prefix to print before streaming (e.g., character name)
+            stream_callback: Optional callback function for streaming text to GUI
             
         Returns:
             Claude's response text
@@ -76,24 +78,40 @@ class ClaudeClient:
         
         try:
             if stream:
-                # Streaming mode - print character by character
-                if prefix:
-                    print(prefix, end="", flush=True)
-                
-                full_response = ""
-                with self.client.messages.stream(
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    system=system_prompt,
-                    messages=messages
-                ) as stream:
-                    for text in stream.text_stream:
-                        print(text, end="", flush=True)
-                        full_response += text
-                
-                print()  # Newline after streaming
-                logger.debug(f"Streamed response: {full_response}")
-                return full_response
+                # Streaming mode - output to callback or stdout
+                if stream_callback:
+                    # Stream to GUI via callback
+                    full_response = ""
+                    with self.client.messages.stream(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        system=system_prompt,
+                        messages=messages
+                    ) as stream:
+                        for text in stream.text_stream:
+                            stream_callback(text)
+                            full_response += text
+                    logger.debug(f"Streamed response to GUI: {full_response}")
+                    return full_response
+                else:
+                    # Stream to stdout (CLI mode)
+                    if prefix:
+                        print(prefix, end="", flush=True)
+                    
+                    full_response = ""
+                    with self.client.messages.stream(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        system=system_prompt,
+                        messages=messages
+                    ) as stream:
+                        for text in stream.text_stream:
+                            print(text, end="", flush=True)
+                            full_response += text
+                    
+                    print()  # Newline after streaming
+                    logger.debug(f"Streamed response: {full_response}")
+                    return full_response
                 
             else:
                 # Non-streaming mode (for decision-making)

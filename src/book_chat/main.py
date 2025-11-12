@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 
 from .anthropic_client import ClaudeClient
 from .core import Character, Narrator, Conversation
+from .gui import ChatWindow
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -79,15 +81,42 @@ def main():
     # Get max turns
     max_turns = config.get("max_turns", 50)
     
-    # Start conversation
-    conversation = Conversation(
-        characters=characters,
-        narrator=narrator,
-        opening_scene=opening_scene,
-        client=client
-    )
+    # Check if GUI mode is enabled (default: true)
+    use_gui = config.get("use_gui", True)
     
-    conversation.start(max_turns=max_turns)
+    if use_gui:
+        # Create GUI window
+        gui = ChatWindow()
+        
+        # Create conversation with GUI
+        conversation = Conversation(
+            characters=characters,
+            narrator=narrator,
+            opening_scene=opening_scene,
+            client=client,
+            gui_window=gui
+        )
+        
+        # Run conversation in separate thread
+        def run_conversation():
+            conversation.start(max_turns=max_turns)
+            gui.close()
+        
+        conversation_thread = threading.Thread(target=run_conversation, daemon=True)
+        conversation_thread.start()
+        
+        # Run GUI main loop (blocks until window closes)
+        gui.run()
+    else:
+        # CLI mode
+        conversation = Conversation(
+            characters=characters,
+            narrator=narrator,
+            opening_scene=opening_scene,
+            client=client
+        )
+        
+        conversation.start(max_turns=max_turns)
 
 
 if __name__ == "__main__":

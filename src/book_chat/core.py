@@ -5,7 +5,7 @@ Core logic for character-based conversation simulation.
 import logging
 import sys
 import select
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 from .anthropic_client import ClaudeClient
 
@@ -82,12 +82,13 @@ class Character:
             logger.error(f"Error checking if {self.name} wants to respond: {e}")
             return False
     
-    def respond(self, conversation_history: List[Dict[str, str]]) -> str:
+    def respond(self, conversation_history: List[Dict[str, str]], stream_callback: Optional[callable] = None) -> str:
         """
-        Generate a response from this character (streamed to CLI).
+        Generate a response from this character (streamed to CLI or GUI).
         
         Args:
             conversation_history: List of conversation messages
+            stream_callback: Optional callback for streaming to GUI
             
         Returns:
             Character's response
@@ -101,7 +102,8 @@ class Character:
             messages=conversation_history,
             max_tokens=500,
             stream=True,
-            prefix=f"\n{self.name}: "
+            prefix=f"\n{self.name}: " if not stream_callback else None,
+            stream_callback=stream_callback
         )
         
         logger.info(f"{self.name} responded: {response}")
@@ -186,12 +188,52 @@ class Narrator:
             logger.error(f"Error in narrator choice: {e}")
             logger.info(f"Defaulting to first character: {characters[0].name}")
             return characters[0]
+    
+    def narrate_scene(self, conversation_history: List[Dict[str, str]], last_speaker: str, stream_callback: Optional[callable] = None) -> str:
+        """
+        Generate a brief scene description showing what's happening.
+        
+        Args:
+            conversation_history: Conversation so far
+            last_speaker: Name of character who just spoke
+            stream_callback: Optional callback for streaming to GUI
+            
+        Returns:
+            Scene description
+        """
+        logger.info("Narrator generating scene description...")
+        
+        system_prompt = (
+            f"{self.guide}\n\n"
+            f"You are the narrator. {last_speaker} just spoke.\n"
+            f"Briefly describe what happens next (1-2 sentences):\n"
+            f"- Body language, facial expressions, or actions\n"
+            f"- Environmental details (sounds, lighting, atmosphere)\n"
+            f"- Tension or mood shifts\n\n"
+            f"Keep it vivid but concise. Only narrate - do not speak as any character."
+        )
+        
+        try:
+            description = self.client.send_message(
+                system_prompt=system_prompt,
+                messages=conversation_history,
+                max_tokens=200,
+                stream=True,
+                stream_callback=stream_callback
+            )
+            
+            logger.info(f"Narrator description: {description}")
+            return description
+            
+        except Exception as e:
+            logger.error(f"Error generating scene description: {e}")
+            return ""
 
 
 class Conversation:
     """Manages the overall conversation simulation."""
     
-    def __init__(self, characters: List[Character], narrator: Narrator, opening_scene: str, client: ClaudeClient):
+    def __init__(self, characters: List[Character], narrator: Narrator, opening_scene: str, client: ClaudeClient, gui_window=None):
         """
         Initialize conversation.
         
@@ -200,6 +242,7 @@ class Conversation:
             narrator: Narrator instance
             opening_scene: Opening situation/prompt
             client: Claude API client for token counting
+            gui_window: Optional GUI window for display
         """
         self.characters = characters
         self.narrator = narrator
@@ -207,6 +250,7 @@ class Conversation:
         self.history: List[Dict[str, str]] = []
         self.client = client
         self.quit_requested = False
+        self.gui = gui_window
         
         logger.info("Conversation initialized")
         logger.info(f"Characters: {[c.name for c in characters]}")
@@ -235,11 +279,15 @@ class Conversation:
         Args:
             max_turns: Maximum number of conversation turns
         """
-        print("\n" + "=" * 80)
-        print("LOCKDOWN AT NEXUS LABS")
-        print("=" * 80)
-        print(f"\n{self.opening_scene}\n")
-        print("\n[Type 'Q' and press Enter at any time to quit]\n")
+        # Display opening scene
+        if self.gui:
+            self.gui.add_message('narrator', self.opening_scene, is_narrator=True)
+        else:
+            print("\n" + "=" * 80)
+            print("LOCKDOWN AT NEXUS LABS")
+            print("=" * 80)
+            print(f"\n{self.opening_scene}\n")
+            print("\n[Type 'Q' and press Enter at any time to quit]\n")
         
         # Add opening scene to history
         self.history.append({
@@ -250,7 +298,10 @@ class Conversation:
         for turn in range(max_turns):
             # Check for quit command
             if self._check_for_quit():
-                print("\n[Quitting conversation...]\n")
+                if self.gui:
+                    self.gui.update_status("Conversation ended")
+                else:
+                    print("\n[Quitting conversation...]\n")
                 break
             
             logger.info(f"\n--- TURN {turn + 1} ---")
@@ -266,7 +317,10 @@ class Conversation:
             
             if not interested_characters:
                 logger.info("No characters want to respond. Conversation ended.")
-                print("\n[The room falls silent. No one has anything more to say.]\n")
+                if self.gui:
+                    self.gui.update_status("Conversation ended - no more responses")
+                else:
+                    print("\n[The room falls silent. No one has anything more to say.]\n")
                 break
             
             # Narrator chooses who speaks
@@ -276,8 +330,34 @@ class Conversation:
                 logger.warning("Narrator couldn't choose a speaker. Ending conversation.")
                 break
             
-            # Character responds (streamed to CLI)
-            response = speaker.respond(self.history)
+            # Narrator describes the scene before character speaks
+            if turn > 0:  # Skip scene description on first turn
+                if self.gui:
+                    self.gui.start_streaming_message('narrator', is_narrator=True)
+                    scene_desc = self.narrator.narrate_scene(
+                        self.history, 
+                        speaker.name,
+                        stream_callback=self.gui.stream_text if self.gui else None
+                    )
+                    self.gui.end_streaming_message()
+                else:
+                    scene_desc = self.narrator.narrate_scene(self.history, speaker.name)
+                    print(f"\n[{scene_desc}]\n")
+                
+                # Add scene description to history
+                if scene_desc:
+                    self.history.append({
+                        "role": "user",
+                        "content": f"[Scene: {scene_desc}]"
+                    })
+            
+            # Character responds
+            if self.gui:
+                self.gui.start_streaming_message(speaker.name, is_narrator=False)
+                response = speaker.respond(self.history, stream_callback=self.gui.stream_text)
+                self.gui.end_streaming_message()
+            else:
+                response = speaker.respond(self.history)
             
             # Add to history
             self.history.append({
@@ -291,17 +371,21 @@ class Conversation:
                 "content": "Continue the conversation."
             })
         
-        print("\n" + "=" * 80)
-        print("CONVERSATION END")
-        print("=" * 80)
+        if not self.gui:
+            print("\n" + "=" * 80)
+            print("CONVERSATION END")
+            print("=" * 80)
         logger.info("Conversation simulation completed")
     
     def _check_for_quit(self) -> bool:
         """
-        Check if user has typed 'Q' to quit.
-        Non-blocking check using select.
+        Check if user has typed 'Q' to quit (CLI) or clicked Quit button (GUI).
         """
-        # Check if input is available (non-blocking)
+        # Check GUI quit button if using GUI
+        if self.gui:
+            return self.gui.is_quit_requested()
+        
+        # Check keyboard input for CLI
         if sys.platform != 'win32':
             # Unix-like systems
             if select.select([sys.stdin], [], [], 0.0)[0]:
