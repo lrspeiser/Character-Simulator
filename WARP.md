@@ -36,9 +36,14 @@ CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
 - Character dialogue in colored bubbles with names
 - Streaming text appears in real-time
 - **Press SPACE to advance** to the next turn (narrator + character)
+- **Play as any character**: Click a character in the right panel to control them
+  - Your input field activates when it's your character's turn
+  - Type dialogue and press Enter or click "Speak"
+  - AI continues playing other characters
+  - "Watch Only" mode to let AI play all characters
 - Click "Quit Conversation" button to exit
 - Large, readable fonts (Arial 14pt)
-- 1000x800 window with clean spacing
+- 1200x800 window with character selection panel
 
 **CLI Mode**:
 - Text streams to terminal
