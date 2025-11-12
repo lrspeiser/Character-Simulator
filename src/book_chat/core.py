@@ -93,19 +93,33 @@ class Character:
             logger.error(f"Error checking if {self.name} wants to respond: {e}")
             return False
     
-    def respond(self, conversation_history: List[Dict[str, str]], stream_callback: Optional[callable] = None) -> str:
+    def respond(self, conversation_history: List[Dict[str, str]], stream_callback: Optional[callable] = None, gui_window=None) -> str:
         """
-        Generate a response from this character (streamed to CLI or GUI).
+        Generate a response from this character (streamed to CLI or GUI, or from human player).
         
         Args:
             conversation_history: List of conversation messages
             stream_callback: Optional callback for streaming to GUI
+            gui_window: GUI window to check if this character is player-controlled
             
         Returns:
             Character's response
         """
         logger.info(f"{self.name} is responding...")
         
+        # Check if this character is controlled by a human player
+        if gui_window and gui_window.get_selected_character() == self.name:
+            logger.info(f"{self.name} is player-controlled, waiting for input...")
+            gui_window.enable_player_input(self.name)
+            response = gui_window.wait_for_player_input()
+            
+            if response is None:  # Player quit
+                return ""
+            
+            logger.info(f"{self.name} (player) responded: {response}")
+            return response
+        
+        # AI-controlled character
         system_prompt = self.get_system_prompt()
         
         response = self.client.send_message(
@@ -415,11 +429,20 @@ class Conversation:
             
             # Character responds
             if self.gui:
-                self.gui.start_streaming_message(speaker.name, is_narrator=False)
-                response = speaker.respond(self.history, stream_callback=self.gui.stream_text)
-                self.gui.end_streaming_message()
+                # Check if player is controlling this character
+                if self.gui.get_selected_character() == speaker.name:
+                    # Player-controlled - no streaming bubble, wait for input
+                    response = speaker.respond(self.history, stream_callback=None, gui_window=self.gui)
+                    # Display player's dialogue in bubble
+                    if response:
+                        self.gui.add_message(speaker.name, response, is_narrator=False)
+                else:
+                    # AI-controlled - stream as normal
+                    self.gui.start_streaming_message(speaker.name, is_narrator=False)
+                    response = speaker.respond(self.history, stream_callback=self.gui.stream_text, gui_window=self.gui)
+                    self.gui.end_streaming_message()
             else:
-                response = speaker.respond(self.history)
+                response = speaker.respond(self.history, gui_window=None)
             
             # Add to history
             self.history.append({

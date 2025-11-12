@@ -12,25 +12,32 @@ from typing import Optional
 class ChatWindow:
     """GUI window displaying conversation as chat bubbles."""
     
-    def __init__(self, title: str = "Book Character Conversation"):
+    def __init__(self, title: str = "Book Character Conversation", characters: list = None):
         """
         Initialize the chat window.
         
         Args:
             title: Window title
+            characters: List of character names for selection panel
         """
         self.root = tk.Tk()
         self.root.title(title)
-        self.root.geometry("1000x800")
+        self.root.geometry("1200x800")
         
         # Set minimum window size
-        self.root.minsize(800, 600)
+        self.root.minsize(1000, 600)
         
         # Message queue for thread-safe updates
         self.message_queue = queue.Queue()
         self.quit_requested = False
         self.paused = True  # Start paused, waiting for first spacebar press
         self.space_pressed = False
+        
+        # Player character selection
+        self.characters = characters or []
+        self.selected_character = None
+        self.player_input = None
+        self.waiting_for_player = False
         
         # Color scheme for different speakers
         self.colors = {
@@ -45,15 +52,93 @@ class ChatWindow:
         self._setup_keybindings()
         self._start_message_processor()
     
+    def _setup_character_panel(self, parent):
+        """Set up the character selection panel."""
+        panel_frame = tk.Frame(parent, bg='#f0f0f0', width=200)
+        panel_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        panel_frame.pack_propagate(False)
+        
+        # Panel title
+        title_label = tk.Label(
+            panel_frame,
+            text="Play as Character",
+            bg='#f0f0f0',
+            fg='#333333',
+            font=('Helvetica', 12, 'bold')
+        )
+        title_label.pack(pady=(10, 5))
+        
+        subtitle_label = tk.Label(
+            panel_frame,
+            text="Click to select:",
+            bg='#f0f0f0',
+            fg='#666666',
+            font=('Helvetica', 9)
+        )
+        subtitle_label.pack(pady=(0, 10))
+        
+        # Character buttons
+        self.character_buttons = {}
+        for char_name in self.characters:
+            btn = tk.Button(
+                panel_frame,
+                text=char_name,
+                command=lambda name=char_name: self._select_character(name),
+                bg='white',
+                fg='#333333',
+                font=('Helvetica', 10),
+                relief=tk.RAISED,
+                padx=10,
+                pady=8,
+                cursor='hand2',
+                wraplength=160
+            )
+            btn.pack(fill=tk.X, padx=10, pady=5)
+            self.character_buttons[char_name] = btn
+        
+        # Observer mode button
+        observer_btn = tk.Button(
+            panel_frame,
+            text="Watch Only\n(AI plays all)",
+            command=lambda: self._select_character(None),
+            bg='#E0E0E0',
+            fg='#333333',
+            font=('Helvetica', 9),
+            relief=tk.RAISED,
+            padx=10,
+            pady=8,
+            cursor='hand2'
+        )
+        observer_btn.pack(fill=tk.X, padx=10, pady=(20, 5))
+        self.character_buttons[None] = observer_btn
+        
+        # Status display
+        self.player_status_label = tk.Label(
+            panel_frame,
+            text="No character selected",
+            bg='#f0f0f0',
+            fg='#999999',
+            font=('Helvetica', 9, 'italic'),
+            wraplength=180
+        )
+        self.player_status_label.pack(pady=(20, 10))
+    
     def _setup_keybindings(self):
         """Set up keyboard shortcuts."""
         self.root.bind('<space>', self._on_space_pressed)
     
     def _setup_ui(self):
         """Set up the UI components."""
-        # Main container
-        main_frame = tk.Frame(self.root, bg='white')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Main container - horizontal split
+        main_container = tk.Frame(self.root, bg='white')
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left side - chat area
+        main_frame = tk.Frame(main_container, bg='white')
+        main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Right side - character selection panel
+        self._setup_character_panel(main_container)
         
         # Title
         title_font = font.Font(family="Helvetica", size=16, weight="bold")
@@ -125,6 +210,42 @@ class ChatWindow:
             cursor='hand2'
         )
         self.quit_button.pack(side=tk.RIGHT)
+        
+        # Input frame for player dialogue
+        input_frame = tk.Frame(main_frame, bg='white')
+        input_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        input_label = tk.Label(
+            input_frame,
+            text="Your dialogue:",
+            bg='white',
+            fg='#666666',
+            font=('Helvetica', 10)
+        )
+        input_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.dialogue_entry = tk.Entry(
+            input_frame,
+            font=('Arial', 12),
+            state=tk.DISABLED,
+            bg='#f5f5f5'
+        )
+        self.dialogue_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.dialogue_entry.bind('<Return>', self._on_dialogue_submit)
+        
+        self.submit_button = tk.Button(
+            input_frame,
+            text="Speak",
+            command=self._on_dialogue_submit,
+            bg='#4CAF50',
+            fg='white',
+            font=('Helvetica', 10, 'bold'),
+            state=tk.DISABLED,
+            relief=tk.FLAT,
+            padx=15,
+            cursor='hand2'
+        )
+        self.submit_button.pack(side=tk.LEFT)
         
         # Status label
         self.status_label = tk.Label(
@@ -254,6 +375,51 @@ class ChatWindow:
         """Update the status label."""
         self.message_queue.put(('status', {'text': text}))
     
+    def _select_character(self, character_name):
+        """Handle character selection."""
+        self.selected_character = character_name
+        
+        # Update button styles
+        for name, btn in self.character_buttons.items():
+            if name == character_name:
+                btn.config(bg='#2196F3', fg='white', relief=tk.SUNKEN)
+            else:
+                if name is None:
+                    btn.config(bg='#E0E0E0', fg='#333333', relief=tk.RAISED)
+                else:
+                    btn.config(bg='white', fg='#333333', relief=tk.RAISED)
+        
+        # Update status
+        if character_name:
+            self.player_status_label.config(
+                text=f"Playing as:\n{character_name}",
+                fg='#2196F3'
+            )
+        else:
+            self.player_status_label.config(
+                text="Observer mode\n(AI plays all)",
+                fg='#999999'
+            )
+    
+    def _on_dialogue_submit(self, event=None):
+        """Handle player dialogue submission."""
+        if not self.waiting_for_player:
+            return
+        
+        dialogue = self.dialogue_entry.get().strip()
+        if not dialogue:
+            return
+        
+        # Store player input
+        self.player_input = dialogue
+        self.waiting_for_player = False
+        
+        # Clear and disable input
+        self.dialogue_entry.delete(0, tk.END)
+        self.dialogue_entry.config(state=tk.DISABLED, bg='#f5f5f5')
+        self.submit_button.config(state=tk.DISABLED)
+        self.update_status("Processing...")
+    
     def _on_space_pressed(self, event=None):
         """Handle spacebar press to advance conversation."""
         self.space_pressed = True
@@ -284,6 +450,33 @@ class ChatWindow:
     def is_paused(self) -> bool:
         """Check if conversation is paused."""
         return self.paused
+    
+    def get_selected_character(self) -> Optional[str]:
+        """Get the name of the character the player is controlling."""
+        return self.selected_character
+    
+    def enable_player_input(self, character_name: str):
+        """Enable the dialogue input for player's turn."""
+        self.waiting_for_player = True
+        self.player_input = None
+        
+        self.dialogue_entry.config(state=tk.NORMAL, bg='white')
+        self.submit_button.config(state=tk.NORMAL)
+        self.dialogue_entry.focus()
+        self.update_status(f"Your turn as {character_name}! Type your dialogue...")
+    
+    def wait_for_player_input(self) -> str:
+        """Wait for player to submit their dialogue."""
+        # Wait for player input
+        while self.waiting_for_player and not self.quit_requested:
+            self.root.update()
+            import time
+            time.sleep(0.05)
+        
+        if self.quit_requested:
+            return None
+        
+        return self.player_input
     
     def run(self):
         """Start the GUI main loop."""

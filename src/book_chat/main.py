@@ -92,8 +92,11 @@ def main():
     use_gui = config.get("use_gui", True)
     
     if use_gui:
-        # Create GUI window
-        gui = ChatWindow()
+        # Get character names for GUI
+        character_names = [char.name for char in characters]
+        
+        # Create GUI window with character selection
+        gui = ChatWindow(characters=character_names)
         
         # Create conversation with GUI
         conversation = Conversation(
