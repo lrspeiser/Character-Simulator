@@ -92,11 +92,15 @@ def main():
     use_gui = config.get("use_gui", True)
     
     if use_gui:
-        # Get character names for GUI
+        # Get character names and backstories for GUI
         character_names = [char.name for char in characters]
+        character_backstories = {char.name: char.backstory for char in characters}
         
-        # Create GUI window with character selection
-        gui = ChatWindow(characters=character_names)
+        # Create GUI window with character selection and backstories
+        gui = ChatWindow(
+            characters=character_names,
+            character_backstories=character_backstories
+        )
         
         # Create conversation with GUI
         conversation = Conversation(

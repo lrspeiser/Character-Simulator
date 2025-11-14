@@ -35,12 +35,14 @@ CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
 - Narrator descriptions in italic gray text
 - Character dialogue in colored bubbles with names
 - Streaming text appears in real-time
-- **Press SPACE to advance** to the next turn (narrator + character)
+- **AI turns auto-advance** - the conversation flows automatically when AI characters speak
+- **The app only waits during your turn** - when it's your selected character's turn to speak
 - **Play as any character**: Click a character in the right panel to control them
   - Your input field activates when it's your character's turn
+  - **Director suggestions appear** just before your turn (see below)
   - Type dialogue and press Enter or click "Speak"
   - AI continues playing other characters
-  - "Watch Only" mode to let AI play all characters
+  - "Watch Only" mode to let AI play all characters (never waits)
 - Click "Quit Conversation" button to exit
 - Large, readable fonts (Arial 14pt)
 - 1200x800 window with character selection panel
@@ -73,9 +75,24 @@ CONFIG_PATH=configs/my_scenario.yaml python -m src.book_chat.main
    - All characters check if they `wants_to_respond()` via LLM call
    - Narrator's `choose_next_speaker()` decides who speaks (using guide for dramatic tension)
 3. **Narrator describes the scene** (body language, environment, tension) - streams in italic gray
-4. **Character speaks their dialogue** (only words, no actions) - streams in colored bubble
-5. Both responses added to history
-6. Cycle continues until max_turns, no responses, or user quits
+4. **If player's turn**: Narrator generates director suggestions (3-5 bullets) displayed as italic gray text, added to history
+5. **Character speaks their dialogue** (only words, no actions) - streams in colored bubble
+6. Both responses added to history
+7. **Auto-advance**: AI turns proceed immediately; only player turns wait for input
+8. Cycle continues until max_turns, no responses, or user quits
+
+### Director Suggestions (Player Assistance)
+When it's your selected character's turn, the narrator LLM generates 3-5 concise suggestions to help you play the character:
+- **When they appear**: Just before "Your turn as <name>!" prompt
+- **Display style**: Narrator bubble (italic gray text) with bullet points
+- **Content**: Emotional state, intent/goal, sample dialogue angles
+- **Based on**: Current conversation, character backstory, dramatic tension
+- **Added to history**: Suggestions are injected as `[Director notes for <name>: ...]` so other LLMs can see them
+- **JSON schema used**:
+  ```json
+  {"suggestions": ["Feeling: <emotion>", "Intent: <goal>", "Angle: <sample>"]}
+  ```
+- **If generation fails**: Logs error verbosely and continues without suggestions (no hidden fallbacks)
 
 ### API Integration
 - **API Key**: Stored in `.env` as `ANTHROPIC_API_KEY` (see .env.example for setup)

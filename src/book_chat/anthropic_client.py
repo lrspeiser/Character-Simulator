@@ -52,7 +52,8 @@ class ClaudeClient:
         max_tokens: int = 1024,
         stream: bool = False,
         prefix: Optional[str] = None,
-        stream_callback: Optional[callable] = None
+        stream_callback: Optional[callable] = None,
+        assistant_prefill: Optional[str] = None
     ) -> str:
         """
         Send a message to Claude and return the response.
@@ -64,9 +65,10 @@ class ClaudeClient:
             stream: Whether to stream the response to stdout
             prefix: Optional prefix to print before streaming (e.g., character name)
             stream_callback: Optional callback function for streaming text to GUI
+            assistant_prefill: Optional prefill text for assistant response (forces format)
             
         Returns:
-            Claude's response text
+            Claude's response text (includes prefill if provided)
         """
         logger.debug("=" * 80)
         logger.debug("SENDING MESSAGE TO CLAUDE")
@@ -75,6 +77,14 @@ class ClaudeClient:
         logger.debug(f"Message count: {len(messages)}")
         logger.debug(f"Max tokens: {max_tokens}")
         logger.debug(f"Streaming: {stream}")
+        logger.debug(f"Assistant prefill: {assistant_prefill}")
+        
+        # Add assistant prefill if provided
+        if assistant_prefill:
+            messages = messages + [{
+                "role": "assistant",
+                "content": assistant_prefill
+            }]
         
         try:
             if stream:
@@ -92,6 +102,9 @@ class ClaudeClient:
                             stream_callback(text)
                             full_response += text
                     logger.debug(f"Streamed response to GUI: {full_response}")
+                    # Include prefill in returned response
+                    if assistant_prefill:
+                        return assistant_prefill + full_response
                     return full_response
                 else:
                     # Stream to stdout (CLI mode)
@@ -111,6 +124,9 @@ class ClaudeClient:
                     
                     print()  # Newline after streaming
                     logger.debug(f"Streamed response: {full_response}")
+                    # Include prefill in returned response
+                    if assistant_prefill:
+                        return assistant_prefill + full_response
                     return full_response
                 
             else:
@@ -131,6 +147,9 @@ class ClaudeClient:
                 logger.debug(f"Response text: {response_text}")
                 logger.debug("=" * 80)
                 
+                # Include prefill in returned response
+                if assistant_prefill:
+                    return assistant_prefill + response_text
                 return response_text
             
         except Exception as e:

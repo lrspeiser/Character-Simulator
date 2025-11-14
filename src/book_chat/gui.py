@@ -12,13 +12,14 @@ from typing import Optional
 class ChatWindow:
     """GUI window displaying conversation as chat bubbles."""
     
-    def __init__(self, title: str = "Book Character Conversation", characters: list = None):
+    def __init__(self, title: str = "Book Character Conversation", characters: list = None, character_backstories: dict = None):
         """
         Initialize the chat window.
         
         Args:
             title: Window title
             characters: List of character names for selection panel
+            character_backstories: Dict mapping character names to their backstory text
         """
         self.root = tk.Tk()
         self.root.title(title)
@@ -35,11 +36,13 @@ class ChatWindow:
         
         # Player character selection
         self.characters = characters or []
+        self.character_backstories = character_backstories or {}
         self.selected_character = None
         self.player_input = None
         self.waiting_for_player = False
+        self.character_panel_frame = None  # Store reference for dynamic updates
         
-        # Color scheme for different speakers
+        # Color scheme for different speakers (with dynamic allocation)
         self.colors = {
             'narrator': '#E8E8E8',  # Light gray
             'Dr. Sarah Chen': '#BBDEFB',  # Light blue
@@ -57,6 +60,11 @@ class ChatWindow:
         panel_frame = tk.Frame(parent, bg='#f0f0f0', width=200)
         panel_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         panel_frame.pack_propagate(False)
+        
+        # Store reference for dynamic updates
+        self.character_panel_frame = panel_frame
+        self.character_buttons_container = tk.Frame(panel_frame, bg='#f0f0f0')
+        self.character_buttons_container.pack(fill=tk.X)
         
         # Panel title
         title_label = tk.Label(
@@ -77,28 +85,13 @@ class ChatWindow:
         )
         subtitle_label.pack(pady=(0, 10))
         
-        # Character buttons
+        # Character buttons (will be populated dynamically)
         self.character_buttons = {}
-        for char_name in self.characters:
-            btn = tk.Button(
-                panel_frame,
-                text=char_name,
-                command=lambda name=char_name: self._select_character(name),
-                bg='white',
-                fg='#333333',
-                font=('Helvetica', 10),
-                relief=tk.RAISED,
-                padx=10,
-                pady=8,
-                cursor='hand2',
-                wraplength=160
-            )
-            btn.pack(fill=tk.X, padx=10, pady=5)
-            self.character_buttons[char_name] = btn
+        self._rebuild_character_buttons()
         
         # Observer mode button
         observer_btn = tk.Button(
-            panel_frame,
+            self.character_buttons_container,
             text="Watch Only\n(AI plays all)",
             command=lambda: self._select_character(None),
             bg='#E0E0E0',
@@ -122,6 +115,97 @@ class ChatWindow:
             wraplength=180
         )
         self.player_status_label.pack(pady=(20, 10))
+        
+        # Backstory display area
+        backstory_title = tk.Label(
+            panel_frame,
+            text="Character Backstory",
+            bg='#f0f0f0',
+            fg='#333333',
+            font=('Helvetica', 10, 'bold')
+        )
+        backstory_title.pack(pady=(10, 5), padx=10, anchor='w')
+        
+        backstory_subtitle = tk.Label(
+            panel_frame,
+            text="(How to play this character)",
+            bg='#f0f0f0',
+            fg='#666666',
+            font=('Helvetica', 8, 'italic')
+        )
+        backstory_subtitle.pack(pady=(0, 5), padx=10, anchor='w')
+        
+        # Scrollable text widget for backstory
+        self.backstory_text = scrolledtext.ScrolledText(
+            panel_frame,
+            wrap=tk.WORD,
+            height=10,
+            font=('Helvetica', 9),
+            bg='white',
+            fg='#333333',
+            relief=tk.SUNKEN,
+            borderwidth=1,
+            state=tk.DISABLED,
+            padx=5,
+            pady=5
+        )
+        self.backstory_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    
+    def _rebuild_character_buttons(self):
+        """Rebuild character buttons from current character list."""
+        # Remove old character buttons (but keep observer button)
+        for char_name in list(self.character_buttons.keys()):
+            if char_name is not None:  # Don't remove observer button
+                self.character_buttons[char_name].destroy()
+                del self.character_buttons[char_name]
+        
+        # Add buttons for all current characters
+        for char_name in self.characters:
+            if char_name not in self.character_buttons:
+                btn = tk.Button(
+                    self.character_buttons_container,
+                    text=char_name,
+                    command=lambda name=char_name: self._select_character(name),
+                    bg='white',
+                    fg='#333333',
+                    font=('Helvetica', 10),
+                    relief=tk.RAISED,
+                    padx=10,
+                    pady=8,
+                    cursor='hand2',
+                    wraplength=160
+                )
+                btn.pack(fill=tk.X, padx=10, pady=5)
+                self.character_buttons[char_name] = btn
+    
+    def add_character(self, name: str, backstory: str, color: str = None):
+        """Add a new character dynamically during the conversation."""
+        if name not in self.characters:
+            self.characters.append(name)
+            self.character_backstories[name] = backstory
+            
+            # Assign color if not already assigned
+            if name not in self.colors:
+                # Generate a color or use default colors cyclically
+                default_colors = ['#BBDEFB', '#C8E6C9', '#FFE0B2', '#F8BBD0', '#E1BEE7', '#FFCCBC']
+                color_index = (len(self.characters) - 1) % len(default_colors)
+                self.colors[name] = color or default_colors[color_index]
+                
+                # Configure chat bubble tag for new character
+                tag_name = f"bubble_{name}"
+                self.chat_display.tag_config(
+                    tag_name,
+                    background=self.colors[name],
+                    spacing1=8,
+                    spacing3=8,
+                    lmargin1=15,
+                    lmargin2=15,
+                    rmargin=15,
+                    borderwidth=0
+                )
+            
+            # Rebuild button panel
+            self._rebuild_character_buttons()
     
     def _setup_keybindings(self):
         """Set up keyboard shortcuts."""
@@ -250,7 +334,7 @@ class ChatWindow:
         # Status label
         self.status_label = tk.Label(
             button_frame,
-            text="Press SPACE to continue...",
+            text="AI conversation running...",
             bg='white',
             fg='#2196F3',
             font=('Helvetica', 11, 'bold')
@@ -400,6 +484,20 @@ class ChatWindow:
                 text="Observer mode\n(AI plays all)",
                 fg='#999999'
             )
+        
+        # Update backstory display
+        self.backstory_text.config(state=tk.NORMAL)
+        self.backstory_text.delete('1.0', tk.END)
+        
+        if character_name and character_name in self.character_backstories:
+            backstory = self.character_backstories[character_name]
+            self.backstory_text.insert('1.0', backstory)
+        elif character_name is None:
+            self.backstory_text.insert('1.0', "Observer mode - You are watching the AI characters interact. No backstory needed.")
+        else:
+            self.backstory_text.insert('1.0', "No backstory available for this character.")
+        
+        self.backstory_text.config(state=tk.DISABLED)
     
     def _on_dialogue_submit(self, event=None):
         """Handle player dialogue submission."""
@@ -436,16 +534,10 @@ class ChatWindow:
         return self.quit_requested
     
     def wait_for_space(self):
-        """Block until user presses space."""
-        self.space_pressed = False
-        self.paused = True
-        self.update_status("Press SPACE to continue...")
-        
-        # Wait for space press
-        while not self.space_pressed and not self.quit_requested:
-            self.root.update()
-            import time
-            time.sleep(0.05)
+        """Block until user presses space (deprecated - kept for backward compatibility)."""
+        # This method is no longer used in the main flow
+        # AI turns auto-advance; only player turns wait for input
+        pass
     
     def is_paused(self) -> bool:
         """Check if conversation is paused."""
