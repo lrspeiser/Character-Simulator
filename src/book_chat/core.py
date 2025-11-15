@@ -254,8 +254,8 @@ class Narrator:
             'speaking style, background.\\n\\nWHAT THIS CHARACTER KNOWS: facts, observations, suspicions they have. '
             'ONLY information this specific character would know.\\n\\nWHAT THIS CHARACTER WANTS: their goals, '
             'motivations, desires.\\n\\nTHIS CHARACTER\'S SECRET: something they\'re hiding, if any. '
-            '3-5 paragraphs total.", "voice_search": "Simple tag for desired voice, one of: male, female, young male, young female, child female"},\n'
-            '   {"name": "Character Name 2", "backstory": "...", "voice_search": "..."}\n'
+            '3-5 paragraphs total.", "voice_description": "Detailed voice description for ElevenLabs Text-to-Speech, 20-200 chars"},\n'
+            '   {"name": "Character Name 2", "backstory": "...", "voice_description": "..."}\n'
             ' ]}\n\n'
             "Guidelines for backstories:\n"
             "- Write each backstory from THAT character's perspective only\n"
@@ -265,12 +265,15 @@ class Narrator:
             "- DO include: what they've personally witnessed or been told\n"
             "- DON'T include: omniscient narrator knowledge or other characters' secrets\n"
             "- Make each character's knowledge asymmetric - they know different things\n\n"
-            "Guidelines for voice_search (for Text-to-Speech):\n"
-            "- Provide a SIMPLE TAG ONLY from this list: male, female, young male, young female, child female\n"
-            "- For boy or teenage male characters, use 'young male' (do NOT use 'child male')\n"
-            "- For clearly childlike girls, use 'child female'; otherwise use 'young female' or 'female'\n"
-            "- Do NOT include extra descriptive words (no 'gravelly', 'scientist', 'detective', ages, etc.)\n"
-            "- This tag will be used to search ElevenLabs voices; do not mention specific voice IDs\n\n"
+            "Guidelines for voice_description (for ElevenLabs Text-to-Speech):\n"
+            "- Provide a DETAILED description (20-200 characters) suitable for voice generation\n"
+            "- Include: gender, age range, accent, tone/mood, speaking style\n"
+            "- Examples:\n"
+            "  * \"Professional female scientist, mid-30s, American accent, anxious but controlled tone\"\n"
+            "  * \"Authoritative male security chief, deep gravelly voice, mid-40s, commanding tone\"\n"
+            "  * \"Young curious female child, 8-10 years old, British accent, energetic and playful\"\n"
+            "- This description will be used by ElevenLabs to design a custom voice if needed\n"
+            "- Be specific but concise (20-200 chars)\n\n"
             "Guidelines for opening scene:\n"
             "- Opening scene should be vivid, cinematic, and create immediate engagement\n"
             "- Create natural conflict or tension between characters\n"
