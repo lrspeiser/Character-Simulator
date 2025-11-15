@@ -172,16 +172,62 @@ def main():
     # Load environment variables from .env
     load_dotenv()
     
-    # Set logging level (INFO so TTS / voice mapping logs are visible during GUI runs)
+    # Set up comprehensive file logging to capture all output including crashes
+    log_file = Path.home() / "book_llm_chat_sim.log"
+    
+    # Configure root logger to write to both console and file
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    for handler in root_logger.handlers:
-        handler.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG)  # Capture everything
+    
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # File handler - captures everything
+    file_handler = logging.FileHandler(log_file, mode='w')  # Overwrite each run
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+    )
+    file_handler.setFormatter(file_formatter)
+    root_logger.addHandler(file_handler)
+    
+    # Console handler - shows important info
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Redirect stdout and stderr to log file as well
+    class TeeOutput:
+        def __init__(self, file_handle, stream):
+            self.file = file_handle
+            self.stream = stream
+        def write(self, data):
+            self.file.write(data)
+            self.file.flush()
+            self.stream.write(data)
+        def flush(self):
+            self.file.flush()
+            self.stream.flush()
+    
+    log_file_handle = open(log_file, 'a')
+    sys.stdout = TeeOutput(log_file_handle, sys.stdout)
+    sys.stderr = TeeOutput(log_file_handle, sys.stderr)
+    
+    logger.info("="*80)
+    logger.info("APPLICATION STARTED")
+    logger.info(f"Log file: {log_file}")
+    logger.info("="*80)
     
     # Get story prompt from user (and keep the window alive so we can reuse it)
+    logger.info(">>> Calling get_story_prompt_from_gui()")
     story_prompt, root = get_story_prompt_from_gui()
+    logger.info("<<< Returned from get_story_prompt_from_gui()")
     
     if not story_prompt:
+        logger.warning("No story prompt provided. Exiting.")
         print("No story prompt provided. Exiting.")
         try:
             root.destroy()
@@ -189,6 +235,7 @@ def main():
             pass
         sys.exit(0)
     
+    logger.info(f"Story prompt: {story_prompt[:100]}...")
     print(f"Generating story from prompt: {story_prompt}")
     
     # Clear the dialog content and show ASCII art loading animation
@@ -440,16 +487,28 @@ def main():
     
     # Run conversation in separate thread with error handling
     def run_conversation():
+        logger.info(">>> run_conversation() thread started")
         try:
+            logger.info(">>> Calling conversation.start(max_turns=50)")
             conversation.start(max_turns=50)
+            logger.info("<<< conversation.start() completed normally")
         except Exception as e:
             import traceback
-            error_msg = f"Error in conversation: {e}\n{traceback.format_exc()}"
+            error_msg = f"FATAL ERROR in conversation: {e}\n{traceback.format_exc()}"
             print(error_msg)
+            logger.critical(error_msg)
             logging.error(error_msg)
-            gui.update_status(f"Error: {str(e)}")
+            try:
+                gui.update_status(f"Error: {str(e)}")
+            except:
+                pass
         finally:
-            gui.close()
+            logger.info(">>> run_conversation() finally block - closing GUI")
+            try:
+                gui.close()
+            except Exception as e:
+                logger.error(f"Error closing GUI: {e}")
+            logger.info("<<< run_conversation() thread exiting")
     
     conversation_thread = threading.Thread(target=run_conversation, daemon=True)
     conversation_thread.start()
