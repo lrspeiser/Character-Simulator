@@ -318,8 +318,19 @@ class ChatWindow:
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True)
         
-        # Bind events to enable text selection even when disabled
-        self.chat_display.bind("<Button-1>", lambda e: "break")  # Allow selection
+        # Bind events to enable text selection and clicks even when disabled
+        # Note: We need to allow events to propagate so tag bindings work
+        def handle_click(event):
+            # Check if clicking on a hint link
+            index = self.chat_display.index(f"@{event.x},{event.y}")
+            tags = self.chat_display.tag_names(index)
+            if 'hint_link' in tags:
+                # Let the tag binding handle it
+                return
+            # Otherwise allow normal selection
+            return "break"
+        
+        self.chat_display.bind("<Button-1>", handle_click)
         self.chat_display.bind("<B1-Motion>", lambda e: "break")  # Allow drag selection
         self.chat_display.bind("<ButtonRelease-1>", lambda e: "break")  # Allow release
         
@@ -469,12 +480,12 @@ class ChatWindow:
         if self.chat_display.index('end-1c') != '1.0':
             self.chat_display.insert(tk.END, '\n')
         
-        # Store starting position
-        self.current_bubble_start = self.chat_display.index('end-1c')
-        
-        # Add speaker name (if not narrator)
+        # Add speaker name (if not narrator) WITHOUT storing it as bubble_start
         if speaker != 'narrator':
             self.chat_display.insert(tk.END, f"{speaker}:\n", 'speaker_name')
+        
+        # Store starting position AFTER speaker name so margins apply to dialogue only
+        self.current_bubble_start = self.chat_display.index('end-1c')
         
         self.chat_display.config(state=tk.DISABLED)
     
