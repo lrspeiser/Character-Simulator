@@ -14,6 +14,7 @@ from .anthropic_client import ClaudeClient
 from .core import Character, Narrator, Conversation
 from .gui import ChatWindow, BG_BLACK, BG_DARK, BG_DARK_ACTIVE, FG_GREEN_BRIGHT, FG_GREEN_DIM, FONT_MAIN, FONT_SMALL
 from .tts_elevenlabs import ElevenLabsTTS
+from .character_review import CharacterReviewWindow
 
 logger = logging.getLogger(__name__)
 
@@ -334,11 +335,8 @@ def main():
     status_text.set("Story generation complete!")
     root.update()
 
-    # Create Character objects and optional ElevenLabs voice mapping
-    characters = []
-    character_names = []
-    character_backstories = {}
-    character_voice_map = {}
+    # Prepare character data for review
+    characters_for_review = []
     
     for char_data in character_data:
         name = char_data.get("name", "Unknown")
@@ -347,16 +345,8 @@ def main():
 
         logger.info("Building character '%s' (has voice_description=%s)", name, bool(voice_description))
 
-        character = Character(
-            name=name,
-            backstory=backstory,
-            client=client
-        )
-        characters.append(character)
-        character_names.append(name)
-        character_backstories[name] = backstory
-
-        # If TTS is enabled and a voice_description is provided, find or create a voice
+        # If TTS is enabled and a voice_description is provided, create a voice
+        voice_id = None
         if tts_client and voice_description:
             logger.info("Resolving voice for '%s' using description: %s", name, voice_description[:100])
             # auto_create=True means it will design/create a new voice if search finds nothing
@@ -367,17 +357,74 @@ def main():
             )
             if voice_id:
                 logger.info("Mapped character '%s' to ElevenLabs voice_id=%s", name, voice_id)
-                character_voice_map[name] = voice_id
             else:
                 logger.warning("No ElevenLabs voice_id resolved for character '%s'", name)
+        
+        # Store all character info for review
+        characters_for_review.append({
+            'name': name,
+            'backstory': backstory,
+            'voice_description': voice_description or "No voice description",
+            'voice_id': voice_id,
+        })
     
-    # Create GUI window, reusing the original prompt window so the UI
-    # stays in a single window instead of flashing multiple windows.
+    # If TTS is enabled, show character review window
+    if tts_client and characters_for_review:
+        # Close the prompt window
+        root.destroy()
+        
+        # This will be set by the review window callback
+        final_voice_map = {}
+        review_complete_event = threading.Event()
+        
+        def on_review_complete(accepted_voices):
+            """Called when user finishes reviewing all characters."""
+            nonlocal final_voice_map
+            final_voice_map = accepted_voices
+            review_complete_event.set()
+        
+        # Show review window (blocks until all characters accepted)
+        review_window = CharacterReviewWindow(
+            characters_data=characters_for_review,
+            tts_client=tts_client,
+            on_complete=on_review_complete
+        )
+        review_window.run()
+        
+        # Wait for review to complete
+        review_complete_event.wait()
+        character_voice_map = final_voice_map
+    else:
+        # No TTS or no characters, skip review
+        character_voice_map = {}
+        root.destroy()
+    
+    # Create Character objects
+    characters = []
+    character_names = []
+    character_backstories = {}
+    
+    for char_data in characters_for_review:
+        name = char_data['name']
+        backstory = char_data['backstory']
+        
+        character = Character(
+            name=name,
+            backstory=backstory,
+            client=client
+        )
+        characters.append(character)
+        character_names.append(name)
+        character_backstories[name] = backstory
+    
+    # Create GUI window
+    import tkinter as tk
+    gui_root = tk.Tk()
     gui = ChatWindow(
         title=title,
         characters=character_names,
         character_backstories=character_backstories,
-        root=root,
+        root=gui_root,
     )
     
     # Create conversation
