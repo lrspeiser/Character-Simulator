@@ -425,6 +425,19 @@ class ElevenLabsTTS:
         text = (text or "").strip()
         if not text:
             return
+        
+        # Check cache first
+        cache_key = self._get_cache_key(voice_id, text)
+        with self._cache_lock:
+            if cache_key in self._audio_cache:
+                # Move to end (mark as recently used)
+                self._audio_cache.move_to_end(cache_key)
+                audio_bytes = self._audio_cache[cache_key]
+                logger.info("Cache HIT for %s (voice_id=%s, %d chars, %d bytes)", label, voice_id, len(text), len(audio_bytes))
+                self._play_audio(audio_bytes, label)
+                return
+        
+        logger.info("Cache MISS for %s (voice_id=%s, %d chars)", label, voice_id, len(text))
 
         ws_url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?output_format=mp3_44100_128"
 
@@ -520,14 +533,48 @@ class ElevenLabsTTS:
             label,
             len(audio_bytes),
         )
-
+        
+        # Store in cache (convert to bytes for immutability)
+        audio_bytes_final = bytes(audio_bytes)
+        with self._cache_lock:
+            self._audio_cache[cache_key] = audio_bytes_final
+            # Enforce LRU eviction if cache exceeds max size
+            while len(self._audio_cache) > self._cache_size:
+                evicted_key = next(iter(self._audio_cache))
+                self._audio_cache.pop(evicted_key)
+                logger.debug("Evicted cache entry (key=%s)", evicted_key)
+            logger.info("Stored in cache (cache_size=%d/%d)", len(self._audio_cache), self._cache_size)
+        
+        # Play the audio
+        self._play_audio(audio_bytes_final, label)
+    
+    def _get_cache_key(self, voice_id: str, text: str) -> str:
+        """Generate a cache key from voice_id and text.
+        
+        Args:
+            voice_id: ElevenLabs voice ID
+            text: Text to be spoken
+            
+        Returns:
+            SHA256 hash of (voice_id, text) as cache key
+        """
+        key_str = f"{voice_id}|{text}"
+        return hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+    
+    def _play_audio(self, audio_bytes: bytes, label: str) -> None:
+        """Play audio bytes using OS audio player.
+        
+        Args:
+            audio_bytes: MP3 audio data to play
+            label: Label for logging (e.g. 'narrator' or 'character:Name')
+        """
         # Write to a temporary file and play it with the OS audio player.
         # On macOS, use 'afplay'. On other platforms, log a warning for now.
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
-        logger.debug("Playing ElevenLabs audio for %s from %s", label, tmp_path)
+        logger.debug("Playing ElevenLabs audio for %s from %s (%d bytes)", label, tmp_path, len(audio_bytes))
 
         try:
             if sys.platform == "darwin":
@@ -537,6 +584,8 @@ class ElevenLabsTTS:
                     volume = "2.0"  # 2x volume for narrator
                 elif label.startswith("character:"):
                     volume = "0.3"  # Lower volume for character voices
+                elif label.startswith("preview:"):
+                    volume = "1.0"  # Normal volume for previews
                 else:
                     volume = "1.0"
                 subprocess.run(["afplay", "-v", volume, tmp_path], check=False)
