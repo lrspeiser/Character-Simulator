@@ -429,12 +429,20 @@ class ElevenLabsTTS:
                 # Call display callback before playing audio (if provided)
                 if display_callback:
                     logger.debug("Calling display_callback before playing audio for %s", label)
-                    display_callback(text)
+                    try:
+                        display_callback(text)
+                    except Exception as cb_error:
+                        logger.error("Error in display_callback for %s: %s", label, cb_error)
+                        import traceback
+                        logger.error("Callback traceback: %s", traceback.format_exc())
+                        # Continue with audio playback even if callback fails
                 
                 self._speak_blocking(voice_id, text, label)
                 logger.debug("Worker completed TTS task label=%s", label)
             except Exception as e:
                 logger.error("Error during ElevenLabs TTS playback (%s): %s", label, e)
+                import traceback
+                logger.error("TTS traceback: %s", traceback.format_exc())
             finally:
                 self._task_queue.task_done()
 
