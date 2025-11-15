@@ -66,8 +66,9 @@ def main():
         
         character = Character(
             name=char_config["name"],
-            backstory_file=backstory_file,
-            client=client
+            backstory=None,  # Will be loaded from file
+            client=client,
+            backstory_file=backstory_file
         )
         characters.append(character)
     
