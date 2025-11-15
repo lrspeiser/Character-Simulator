@@ -372,29 +372,39 @@ class Narrator:
                 assistant_prefill='{"next_speaker": "'
             )
             
+            logger.info(f"Narrator choice raw response: {choice}")
+            
             # Parse JSON response (prefilled with {"next_speaker": ")
             try:
                 parsed = json.loads(choice)
                 choice_name = parsed.get("next_speaker", "").strip()
-            except json.JSONDecodeError:
+                logger.info(f"Parsed next_speaker: '{choice_name}'")
+            except json.JSONDecodeError as e:
                 # Fallback: extract name from response
-                logger.warning(f"JSON parse error in narrator choice: {choice}")
+                logger.error(f"JSON parse error in narrator choice: {e}")
+                logger.error(f"Raw choice response: {choice}")
                 choice_name = choice.strip().strip('"}')
+                logger.info(f"Fallback extracted name: '{choice_name}'")
             
             # Find matching character (exact match first)
+            logger.info(f"Attempting to match choice_name='{choice_name}' against characters: {[c.name for c in characters]}")
+            
             for character in characters:
                 if character.name.lower() == choice_name.lower():
-                    logger.info(f"Narrator chose (exact): {character.name}")
+                    logger.info(f"✓ Narrator chose (exact match): {character.name}")
                     return character
             
             # Try partial match
+            logger.warning(f"No exact match for '{choice_name}', trying partial match")
             for character in characters:
                 if character.name.lower() in choice_name.lower() or choice_name.lower() in character.name.lower():
-                    logger.info(f"Narrator chose (partial): {character.name}")
+                    logger.warning(f"✓ Narrator chose (partial match): {character.name} (from choice '{choice_name}')")
                     return character
             
             # Default to first if no match
-            logger.warning(f"Narrator choice '{choice_name}' didn't match any character, defaulting to {characters[0].name}")
+            logger.error(f"✗ FALLBACK: Narrator choice '{choice_name}' didn't match any character!")
+            logger.error(f"Available characters were: {[c.name for c in characters]}")
+            logger.error(f"Defaulting to first character: {characters[0].name}")
             return characters[0]
             
         except Exception as e:
@@ -729,8 +739,13 @@ class Conversation:
             speaker = self.narrator.choose_next_speaker(interested_characters, self.history)
             
             if not speaker:
-                logger.warning("Narrator couldn't choose a speaker. Ending conversation.")
+                logger.error("CRITICAL: Narrator couldn't choose a speaker. Ending conversation.")
+                logger.error(f"Interested characters were: {[c.name for c in interested_characters]}")
+                if self.gui:
+                    self.gui.update_status("Error: Narrator failed to choose speaker")
                 break
+            
+            logger.info(f"Speaker selected: {speaker.name}")
             
             # Narrator decides if scene description is needed
             if turn > 0 and self.last_speaker_name:  # Skip scene description on first turn
