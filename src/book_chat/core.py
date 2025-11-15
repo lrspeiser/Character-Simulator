@@ -768,22 +768,33 @@ class Conversation:
                 
                 # Only display and add to history if narrator provided description
                 if scene_desc:
-                    if self.gui:
-                        self.gui.start_streaming_message('narrator', is_narrator=True)
-                        # Stream the scene description
-                        for char in scene_desc:
-                            self.gui.stream_text(char)
-                        self.gui.end_streaming_message()
-                    else:
-                        print(f"\n[{scene_desc}]\n")
-
-                    # Send scene description to TTS narrator if enabled
+                    # Send scene description to TTS narrator if enabled, with callback to display text
                     if self.tts:
                         try:
                             logger.info("Sending scene description to TTS narrator (%d chars)", len(scene_desc))
-                            self.tts.speak_narrator(scene_desc)
+                            # Display text when audio starts playing
+                            def display_scene():
+                                if self.gui:
+                                    self.gui.start_streaming_message('narrator', is_narrator=True)
+                                    # Stream the scene description
+                                    for char in scene_desc:
+                                        self.gui.stream_text(char)
+                                    self.gui.end_streaming_message()
+                                else:
+                                    print(f"\n[{scene_desc}]\n")
+                            
+                            self.tts.speak_narrator(scene_desc, display_callback=lambda text: display_scene())
                         except Exception as e:
                             logger.error(f"Error sending scene description to TTS: {e}")
+                    else:
+                        # No TTS - display immediately
+                        if self.gui:
+                            self.gui.start_streaming_message('narrator', is_narrator=True)
+                            for char in scene_desc:
+                                self.gui.stream_text(char)
+                            self.gui.end_streaming_message()
+                        else:
+                            print(f"\n[{scene_desc}]\n")
                     
                     # Add scene description to history
                     self.history.append({
@@ -833,18 +844,28 @@ class Conversation:
                         dialogue, behavior = result
                     else:
                         dialogue, behavior = result, None
-                    # Display player's dialogue in bubble
+                    # Display player's dialogue in bubble (no TTS for player input)
                     if dialogue:
                         self.gui.add_message(speaker.name, dialogue, is_narrator=False)
                 else:
-                    # AI-controlled - stream as normal
-                    self.gui.start_streaming_message(speaker.name, is_narrator=False)
-                    result = speaker.respond(self.history, stream_callback=self.gui.stream_text, gui_window=self.gui)
-                    if isinstance(result, tuple):
-                        dialogue, behavior = result
+                    # AI-controlled
+                    if self.tts:
+                        # With TTS: Generate dialogue WITHOUT displaying, display via TTS callback
+                        result = speaker.respond(self.history, stream_callback=None, gui_window=self.gui)
+                        if isinstance(result, tuple):
+                            dialogue, behavior = result
+                        else:
+                            dialogue, behavior = result, None
+                        # Text will be displayed when TTS plays (see below)
                     else:
-                        dialogue, behavior = result, None
-                    self.gui.end_streaming_message()
+                        # No TTS: Stream as normal
+                        self.gui.start_streaming_message(speaker.name, is_narrator=False)
+                        result = speaker.respond(self.history, stream_callback=self.gui.stream_text, gui_window=self.gui)
+                        if isinstance(result, tuple):
+                            dialogue, behavior = result
+                        else:
+                            dialogue, behavior = result, None
+                        self.gui.end_streaming_message()
             else:
                 result = speaker.respond(self.history, gui_window=None)
                 if isinstance(result, tuple):
@@ -878,7 +899,16 @@ class Conversation:
 
                     if voice_id:
                         logger.info("Sending character '%s' dialogue to TTS (%d chars)", speaker.name, len(dialogue))
-                        self.tts.speak_character(speaker.name, voice_id, dialogue)
+                        
+                        # Display text when audio starts playing (if not player turn)
+                        if not is_player_turn and self.gui:
+                            def display_dialogue():
+                                self.gui.add_message(speaker.name, dialogue, is_narrator=False)
+                            
+                            self.tts.speak_character(speaker.name, voice_id, dialogue, display_callback=lambda text: display_dialogue())
+                        else:
+                            # Player turn or CLI mode - no callback needed (already displayed)
+                            self.tts.speak_character(speaker.name, voice_id, dialogue)
                 except Exception as e:
                     logger.error(f"Error sending character dialogue to TTS for {speaker.name}: {e}")
             
