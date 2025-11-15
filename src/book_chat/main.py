@@ -33,13 +33,7 @@ def get_story_prompt_from_gui():
     def on_submit():
         # Capture prompt text
         prompt_result["value"] = text_area.get("1.0", tk.END).strip()
-        # Update UI to indicate processing while we generate the story
-        status_label.config(text="Creating your story...")
-        text_area.config(state=tk.DISABLED)
-        cancel_btn.config(cursor="watch")
-        submit_btn.config(cursor="watch")
-        dialog.update_idletasks()
-        # Quit the event loop but keep the window alive so it stays visible
+        # Quit the event loop but keep the window alive for loading animation
         dialog.quit()
     
     def on_cancel():
@@ -196,6 +190,105 @@ def main():
     
     print(f"Generating story from prompt: {story_prompt}")
     
+    # Clear the dialog content and show ASCII art loading animation
+    import tkinter as tk
+    from tkinter import scrolledtext
+    
+    # Clear all widgets from dialog
+    for widget in root.winfo_children():
+        widget.destroy()
+    
+    root.title("Generating Story...")
+    root.configure(bg=BG_BLACK)
+    
+    # Create ASCII art display area
+    ascii_canvas = scrolledtext.ScrolledText(
+        root,
+        wrap=tk.WORD,
+        width=80,
+        height=25,
+        font=("Courier New", 10),
+        bg=BG_BLACK,
+        fg=FG_GREEN_BRIGHT,
+        insertbackground=FG_GREEN_BRIGHT,
+        relief=tk.FLAT,
+        bd=0,
+        state=tk.DISABLED,
+    )
+    ascii_canvas.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+    
+    # ASCII art to display character by character
+    loading_art = r"""
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║                                                               ║
+    ║              GENERATING YOUR STORY...                         ║
+    ║                                                               ║
+    ║    ███████╗████████╗ ██████╗ ██████╗ ██╗   ██╗               ║
+    ║    ██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚██╗ ██╔╝               ║
+    ║    ███████╗   ██║   ██║   ██║██████╔╝ ╚████╔╝                ║
+    ║    ╚════██║   ██║   ██║   ██║██╔══██╗  ╚██╔╝                 ║
+    ║    ███████║   ██║   ╚██████╔╝██║  ██║   ██║                  ║
+    ║    ╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝   ╚═╝                  ║
+    ║                                                               ║
+    ║         Building Characters...                                ║
+    ║         Crafting Dialogue...                                  ║
+    ║         Designing Voices...                                   ║
+    ║                                                               ║
+    ╚═══════════════════════════════════════════════════════════════╝
+    """
+    
+    status_text = tk.StringVar(value="")
+    status_label = tk.Label(
+        root,
+        textvariable=status_text,
+        font=FONT_SMALL,
+        bg=BG_BLACK,
+        fg=FG_GREEN_DIM,
+    )
+    status_label.pack(pady=10)
+    
+    # Animation state
+    animation_state = {
+        "index": 0,
+        "running": True,
+        "status_messages": [
+            "Initializing narrator...",
+            "Generating story structure...",
+            "Creating characters...",
+            "Building backstories...",
+            "Designing character voices...",
+            "Finalizing details...",
+        ],
+        "status_index": 0,
+    }
+    
+    def animate_ascii():
+        """Animate ASCII art character by character."""
+        if not animation_state["running"]:
+            return
+        
+        if animation_state["index"] < len(loading_art):
+            # Add next character
+            ascii_canvas.config(state=tk.NORMAL)
+            char = loading_art[animation_state["index"]]
+            ascii_canvas.insert(tk.END, char)
+            ascii_canvas.config(state=tk.DISABLED)
+            ascii_canvas.see(tk.END)
+            animation_state["index"] += 1
+            
+            # Schedule next character (faster animation)
+            root.after(5, animate_ascii)
+        else:
+            # Art is done, cycle through status messages
+            idx = animation_state["status_index"] % len(animation_state["status_messages"])
+            status_text.set(animation_state["status_messages"][idx])
+            animation_state["status_index"] += 1
+            root.after(800, animate_ascii)  # Update status every 800ms
+    
+    # Start animation in background
+    root.after(50, animate_ascii)
+    root.update()
+    
     # Initialize Claude client
     model = os.getenv("MODEL", "claude-sonnet-4-20250514")
     client = ClaudeClient(model=model)
@@ -235,6 +328,11 @@ def main():
         sys.exit(1)
 
     print(f"Story created: '{title}' with {len(character_data)} characters!")
+    
+    # Stop the loading animation
+    animation_state["running"] = False
+    status_text.set("Story generation complete!")
+    root.update()
 
     # Create Character objects and optional ElevenLabs voice mapping
     characters = []
