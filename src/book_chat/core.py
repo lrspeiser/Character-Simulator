@@ -683,23 +683,34 @@ class Conversation:
         Args:
             max_turns: Maximum number of conversation turns
         """
-        # Display opening scene
-        if self.gui:
-            self.gui.add_message('narrator', self.opening_scene, is_narrator=True)
-        else:
-            print("\n" + "=" * 80)
-            print("LOCKDOWN AT NEXUS LABS")
-            print("=" * 80)
-            print(f"\n{self.opening_scene}\n")
-            print("\n[Type 'Q' and press Enter at any time to quit]\n")
-
-        # Send opening scene to TTS narrator if enabled
+        # Send opening scene to TTS narrator if enabled, with callback to display text
         if self.tts:
             try:
                 logger.info("Sending opening scene to TTS narrator (%d chars)", len(self.opening_scene))
-                self.tts.speak_narrator(self.opening_scene)
+                # Display text when audio starts playing
+                def display_opening():
+                    if self.gui:
+                        self.gui.add_message('narrator', self.opening_scene, is_narrator=True)
+                    else:
+                        print("\n" + "=" * 80)
+                        print("LOCKDOWN AT NEXUS LABS")
+                        print("=" * 80)
+                        print(f"\n{self.opening_scene}\n")
+                        print("\n[Type 'Q' and press Enter at any time to quit]\n")
+                
+                self.tts.speak_narrator(self.opening_scene, display_callback=lambda text: display_opening())
             except Exception as e:
                 logger.error(f"Error sending opening scene to TTS: {e}")
+        else:
+            # No TTS - display immediately
+            if self.gui:
+                self.gui.add_message('narrator', self.opening_scene, is_narrator=True)
+            else:
+                print("\n" + "=" * 80)
+                print("LOCKDOWN AT NEXUS LABS")
+                print("=" * 80)
+                print(f"\n{self.opening_scene}\n")
+                print("\n[Type 'Q' and press Enter at any time to quit]\n")
         
         # Add opening scene to history
         self.history.append({

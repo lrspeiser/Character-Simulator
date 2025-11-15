@@ -74,25 +74,27 @@ class ElevenLabsTTS:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def speak_narrator(self, text: str) -> None:
+    def speak_narrator(self, text: str, display_callback=None) -> None:
         """Queue narrator text for speech with the narrator voice.
 
         Args:
             text: Text to be spoken.
+            display_callback: Optional callback(text) to display text when audio starts playing
         """
         if not text or not text.strip():
             logger.debug("speak_narrator called with empty text; skipping")
             return
         logger.info("Queueing narrator TTS (%d chars)", len(text))
-        self._enqueue(self.narrator_voice_id, text, label="narrator")
+        self._enqueue(self.narrator_voice_id, text, label="narrator", display_callback=display_callback)
 
-    def speak_character(self, character_name: str, voice_id: Optional[str], text: str) -> None:
+    def speak_character(self, character_name: str, voice_id: Optional[str], text: str, display_callback=None) -> None:
         """Queue character text for speech using the given voice.
 
         Args:
             character_name: Name of the character (for logging only).
             voice_id: ElevenLabs voice ID to use (if None, no audio).
             text: Text to be spoken.
+            display_callback: Optional callback(text) to display text when audio starts playing
         """
         if not text or not text.strip():
             logger.debug("speak_character called with empty text for %s; skipping", character_name)
@@ -102,7 +104,7 @@ class ElevenLabsTTS:
             return
         label = f"character:{character_name}"
         logger.info("Queueing character TTS for %s (voice_id=%s, %d chars)", character_name, voice_id, len(text))
-        self._enqueue(voice_id, text, label=label)
+        self._enqueue(voice_id, text, label=label, display_callback=display_callback)
     
     def preview_voice(self, voice_id: str, character_name: str) -> None:
         """Play a short preview of the voice immediately (not queued).
@@ -315,9 +317,9 @@ class ElevenLabsTTS:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _enqueue(self, voice_id: str, text: str, label: str) -> None:
+    def _enqueue(self, voice_id: str, text: str, label: str, display_callback=None) -> None:
         logger.debug("Enqueuing TTS task label=%s voice_id=%s length=%d", label, voice_id, len(text))
-        self._task_queue.put((voice_id, text, label))
+        self._task_queue.put((voice_id, text, label, display_callback))
 
     def _load_fallback_voice_ids(self) -> None:
         """Load and cache all available ElevenLabs voices for fallback mapping.
@@ -421,9 +423,14 @@ class ElevenLabsTTS:
     def _worker_loop(self) -> None:
         logger.debug("ElevenLabsTTS worker loop started")
         while True:
-            voice_id, text, label = self._task_queue.get()
+            voice_id, text, label, display_callback = self._task_queue.get()
             logger.debug("Worker picked up TTS task label=%s voice_id=%s length=%d", label, voice_id, len(text))
             try:
+                # Call display callback before playing audio (if provided)
+                if display_callback:
+                    logger.debug("Calling display_callback before playing audio for %s", label)
+                    display_callback(text)
+                
                 self._speak_blocking(voice_id, text, label)
                 logger.debug("Worker completed TTS task label=%s", label)
             except Exception as e:
