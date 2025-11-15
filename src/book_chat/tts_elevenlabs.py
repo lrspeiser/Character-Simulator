@@ -602,15 +602,18 @@ class ElevenLabsTTS:
         try:
             if sys.platform == "darwin":
                 # macOS: afplay is the built-in CLI audio player
-                # Narrator is louder, character voices are quieter for balance
+                # NOTE: afplay -v range is 0.0 to 1.0 only (not higher)
+                # To make narrator louder, we keep narrator at 1.0 and lower characters
                 if label == "narrator":
-                    volume = "2.0"  # 2x volume for narrator
+                    volume = "1.0"  # Full volume for narrator
                 elif label.startswith("character:"):
-                    volume = "0.3"  # Lower volume for character voices
+                    volume = "0.2"  # Much lower volume for character voices (was 0.3)
                 elif label.startswith("preview:"):
-                    volume = "1.0"  # Normal volume for previews
+                    volume = "0.5"  # Medium volume for previews
                 else:
-                    volume = "1.0"
+                    volume = "0.8"
+                
+                logger.debug(f"Playing {label} at volume {volume}")
                 subprocess.run(["afplay", "-v", volume, tmp_path], check=False)
             else:
                 logger.warning(
