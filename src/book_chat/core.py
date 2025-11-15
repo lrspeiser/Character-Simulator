@@ -107,7 +107,7 @@ class Character:
             response = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
-                max_tokens=10,
+                max_tokens=50,  # Increased from 10 to give more breathing room for YES/NO responses
                 stream=False
             )
             
@@ -530,7 +530,7 @@ class Narrator:
             decision = self.client.send_message(
                 system_prompt=decision_prompt,
                 messages=conversation_history,
-                max_tokens=10,
+                max_tokens=50,  # Increased from 10
                 stream=False
             )
             
@@ -739,12 +739,91 @@ class Conversation:
                     interested_characters.append(character)
             
             if not interested_characters:
-                logger.info("No characters want to respond. Conversation ended.")
-                if self.gui:
-                    self.gui.update_status("Conversation ended - no more responses")
-                else:
-                    print("\n[The room falls silent. No one has anything more to say.]\n")
-                break
+                logger.warning("No characters want to respond. Narrator creating new situation...")
+                
+                # Narrator creates a new situation/event to re-engage characters
+                situation_prompt = (
+                    f"{self.narrator.guide if self.narrator.guide else ''}\n\n"
+                    f"The characters have gone silent. As the narrator, create a NEW SITUATION or EVENT "
+                    f"that changes the environment and demands a response.\n\n"
+                    f"Examples of situation changes:\n"
+                    f"- A sudden sound, alarm, or system malfunction\n"
+                    f"- Discovery of new evidence or information\n"
+                    f"- Environmental change (lights flicker, door opens, temperature drops)\n"
+                    f"- Time passing with a visible consequence\n"
+                    f"- External interruption or communication\n\n"
+                    f"Keep it 2-3 sentences. Make it dramatic and impossible to ignore.\n"
+                    f"Do NOT include character dialogue - only describe what happens."
+                )
+                
+                try:
+                    new_situation = self.client.send_message(
+                        system_prompt=situation_prompt,
+                        messages=self.history,
+                        max_tokens=200,
+                        stream=False
+                    )
+                    
+                    if new_situation and new_situation.strip():
+                        logger.info(f"Narrator created new situation: {new_situation[:100]}...")
+                        
+                        # Display the new situation
+                        if self.tts:
+                            try:
+                                # Display text when audio starts playing
+                                def display_situation():
+                                    if self.gui:
+                                        self.gui.start_streaming_message('narrator', is_narrator=True)
+                                        for char in new_situation:
+                                            self.gui.stream_text(char)
+                                        self.gui.end_streaming_message()
+                                    else:
+                                        print(f"\n[{new_situation}]\n")
+                                
+                                self.tts.speak_narrator(new_situation, display_callback=lambda text: display_situation())
+                            except Exception as e:
+                                logger.error(f"Error sending situation to TTS: {e}")
+                        else:
+                            # No TTS - display immediately
+                            if self.gui:
+                                self.gui.start_streaming_message('narrator', is_narrator=True)
+                                for char in new_situation:
+                                    self.gui.stream_text(char)
+                                self.gui.end_streaming_message()
+                            else:
+                                print(f"\n[{new_situation}]\n")
+                        
+                        # Add to history
+                        self.history.append({
+                            "role": "user",
+                            "content": f"[Situation: {new_situation}]"
+                        })
+                        
+                        # Try again - check if anyone wants to respond now
+                        interested_characters = []
+                        for character in self.characters:
+                            if character.wants_to_respond(self.history):
+                                interested_characters.append(character)
+                        
+                        if not interested_characters:
+                            logger.info("Still no responses after narrator intervention. Ending conversation.")
+                            if self.gui:
+                                self.gui.update_status("Conversation ended")
+                            else:
+                                print("\n[The room falls silent.]\n")
+                            break
+                        
+                        # Continue with the new interested characters
+                        logger.info(f"After situation: {[c.name for c in interested_characters]} want to respond")
+                    else:
+                        logger.error("Narrator failed to create new situation")
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Error creating new situation: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    break
             
             # Narrator chooses who speaks
             speaker = self.narrator.choose_next_speaker(interested_characters, self.history)
