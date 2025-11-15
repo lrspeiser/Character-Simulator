@@ -8,6 +8,7 @@ API key setup and usage details are documented in README.md under
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +17,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+from collections import OrderedDict
 from typing import Optional, Dict
 
 import requests
@@ -37,7 +40,7 @@ class ElevenLabsTTS:
           ElevenLabs API documentation.
     """
 
-    def __init__(self, api_key: Optional[str] = None, narrator_voice_id: str = NARRATOR_VOICE_ID):
+    def __init__(self, api_key: Optional[str] = None, narrator_voice_id: str = NARRATOR_VOICE_ID, cache_size: int = 50):
         self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY")
         if not self.api_key:
             raise ValueError(
@@ -53,11 +56,15 @@ class ElevenLabsTTS:
         self._fallback_voices: list[dict] = []  # each: {"voice_id", "name", "description", "labels", ...}
         self._fallback_index: int = 0
 
-        logger.info("ElevenLabsTTS initializing (narrator_voice_id=%s)", self.narrator_voice_id)
+        # Audio cache for pre-generated TTS (LRU cache with max size)
+        self._audio_cache: OrderedDict[str, bytes] = OrderedDict()
+        self._cache_size = cache_size
+        self._cache_lock = threading.Lock()
+
+        logger.info("ElevenLabsTTS initializing (narrator_voice_id=%s, cache_size=%d)", self.narrator_voice_id, cache_size)
 
         # Background queue so audio playback doesn't block the UI
         self._task_queue: "queue.Queue[tuple[str, str, str]]" = queue.Queue()
-        import threading
 
         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker_thread.start()
@@ -96,6 +103,22 @@ class ElevenLabsTTS:
         label = f"character:{character_name}"
         logger.info("Queueing character TTS for %s (voice_id=%s, %d chars)", character_name, voice_id, len(text))
         self._enqueue(voice_id, text, label=label)
+    
+    def preview_voice(self, voice_id: str, character_name: str) -> None:
+        """Play a short preview of the voice immediately (not queued).
+        
+        Args:
+            voice_id: ElevenLabs voice ID to preview
+            character_name: Character name (used in preview text)
+        """
+        preview_text = f"Hello, my name is {character_name}. I'm ready to begin our story."
+        logger.info("Previewing voice_id=%s for %s", voice_id, character_name)
+        
+        # Generate and play immediately (blocking)
+        try:
+            self._speak_blocking(voice_id, preview_text, f"preview:{character_name}")
+        except Exception as e:
+            logger.error("Error previewing voice for %s: %s", character_name, e)
 
     def design_and_create_voice(self, voice_name: str, voice_description: str) -> Optional[str]:
         """Design a voice using ElevenLabs Text-to-Voice API and create it.
