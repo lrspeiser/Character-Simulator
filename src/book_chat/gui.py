@@ -1,6 +1,4 @@
-"""
-GUI chat window for book character conversations.
-"""
+"""GUI chat window for book character conversations."""
 
 import tkinter as tk
 from tkinter import scrolledtext, font
@@ -8,22 +6,48 @@ import threading
 import queue
 from typing import Optional
 
+# Green-screen terminal theme constants
+BG_BLACK = "#000000"
+BG_DARK = "#001100"
+BG_DARK_ACTIVE = "#003300"
+FG_GREEN_BRIGHT = "#00FF66"
+FG_GREEN_DIM = "#00AA44"
+FG_GREEN_ALT1 = "#00DD55"
+FG_GREEN_ALT2 = "#00BB44"
+FONT_MAIN = ("Courier New", 14)
+FONT_HEADER = ("Courier New", 16, "bold")
+FONT_SMALL = ("Courier New", 10)
+
 
 class ChatWindow:
     """GUI window displaying conversation as chat bubbles."""
     
-    def __init__(self, title: str = "Book Character Conversation", characters: list = None, character_backstories: dict = None):
-        """
-        Initialize the chat window.
-        
+    def __init__(self, title: str = "Book Character Conversation", characters: list = None, character_backstories: dict = None, root=None):
+        """Initialize the chat window.
+
         Args:
             title: Window title
             characters: List of character names for selection panel
             character_backstories: Dict mapping character names to their backstory text
+            root: Optional existing Tk root to attach to (used in dynamic story mode
+                so the prompt window and chat share a single window).
         """
-        self.root = tk.Tk()
+        # Allow reusing an existing root (dynamic story mode) so we don't flash
+        # multiple windows. If no root is provided, create our own.
+        if root is None:
+            self.root = tk.Tk()
+        else:
+            self.root = root
+            # Clear any existing widgets from the prompt UI before building chat UI
+            for child in self.root.winfo_children():
+                child.destroy()
+
         self.root.title(title)
         self.root.geometry("1200x800")
+        self.root.configure(bg=BG_BLACK)
+
+        # Keep a copy of the window title text for in-UI header
+        self.window_title_text = title
         
         # Set minimum window size
         self.root.minsize(1000, 600)
@@ -42,46 +66,88 @@ class ChatWindow:
         self.waiting_for_player = False
         self.character_panel_frame = None  # Store reference for dynamic updates
         
-        # Color scheme for different speakers (with dynamic allocation)
+        # Color scheme for different speakers (foreground text colors in green-screen theme)
         self.colors = {
-            'narrator': '#E8E8E8',  # Light gray
-            'Dr. Sarah Chen': '#BBDEFB',  # Light blue
-            'Marcus Webb': '#C8E6C9',  # Light green
-            'Victoria Reeves': '#FFE0B2',  # Light orange
-            'system': '#F5F5F5'  # Very light gray
+            'narrator': FG_GREEN_DIM,
+            'Dr. Sarah Chen': FG_GREEN_BRIGHT,
+            'Marcus Webb': FG_GREEN_ALT1,
+            'Victoria Reeves': FG_GREEN_ALT2,
+            'system': FG_GREEN_BRIGHT,
         }
         
         self._setup_ui()
         self._setup_keybindings()
         self._start_message_processor()
+
+        # Default player-controlled character: first in list if available
+        if self.characters:
+            self._select_character(self.characters[0])
+        else:
+            self._select_character(None)
+    
+    def _create_button(self, parent, text, command, width=None, wraplength=None):
+        """Create a label-based button that respects our dark theme on all platforms."""
+        btn = tk.Label(
+            parent,
+            text=text,
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
+            font=FONT_SMALL,
+            bd=1,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=FG_GREEN_BRIGHT,
+            highlightcolor=FG_GREEN_BRIGHT,
+            padx=10,
+            pady=8,
+            cursor='hand2',
+            wraplength=wraplength if wraplength is not None else 0,
+            justify='center',
+        )
+        # Store base background color so selection/hover can override temporarily
+        btn.base_bg = BG_BLACK
+
+        def on_enter(_event):
+            btn.config(bg=BG_DARK_ACTIVE)
+
+        def on_leave(_event):
+            btn.config(bg=getattr(btn, "base_bg", BG_BLACK))
+
+        def on_click(_event):
+            command()
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.bind("<Button-1>", on_click)
+        return btn
     
     def _setup_character_panel(self, parent):
         """Set up the character selection panel."""
-        panel_frame = tk.Frame(parent, bg='#f0f0f0', width=200)
+        panel_frame = tk.Frame(parent, bg=BG_BLACK, width=200)
         panel_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         panel_frame.pack_propagate(False)
         
         # Store reference for dynamic updates
         self.character_panel_frame = panel_frame
-        self.character_buttons_container = tk.Frame(panel_frame, bg='#f0f0f0')
+        self.character_buttons_container = tk.Frame(panel_frame, bg=BG_BLACK)
         self.character_buttons_container.pack(fill=tk.X)
         
         # Panel title
         title_label = tk.Label(
             panel_frame,
             text="Play as Character",
-            bg='#f0f0f0',
-            fg='#333333',
-            font=('Helvetica', 12, 'bold')
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
+            font=FONT_SMALL
         )
         title_label.pack(pady=(10, 5))
         
         subtitle_label = tk.Label(
             panel_frame,
             text="Click to select:",
-            bg='#f0f0f0',
-            fg='#666666',
-            font=('Helvetica', 9)
+            bg=BG_BLACK,
+            fg=FG_GREEN_DIM,
+            font=FONT_SMALL
         )
         subtitle_label.pack(pady=(0, 10))
         
@@ -90,18 +156,15 @@ class ChatWindow:
         self._rebuild_character_buttons()
         
         # Observer mode button
-        observer_btn = tk.Button(
+        observer_btn = self._create_button(
             self.character_buttons_container,
             text="Watch Only\n(AI plays all)",
             command=lambda: self._select_character(None),
-            bg='#E0E0E0',
-            fg='#333333',
-            font=('Helvetica', 9),
-            relief=tk.RAISED,
-            padx=10,
-            pady=8,
-            cursor='hand2'
+            wraplength=160,
         )
+        # Default base background for observer / character buttons
+        observer_btn.base_bg = BG_DARK
+        observer_btn.config(bg=observer_btn.base_bg)
         observer_btn.pack(fill=tk.X, padx=10, pady=(20, 5))
         self.character_buttons[None] = observer_btn
         
@@ -109,9 +172,9 @@ class ChatWindow:
         self.player_status_label = tk.Label(
             panel_frame,
             text="No character selected",
-            bg='#f0f0f0',
-            fg='#999999',
-            font=('Helvetica', 9, 'italic'),
+            bg=BG_BLACK,
+            fg=FG_GREEN_DIM,
+            font=("Courier New", 9, "italic"),
             wraplength=180
         )
         self.player_status_label.pack(pady=(20, 10))
@@ -120,18 +183,18 @@ class ChatWindow:
         backstory_title = tk.Label(
             panel_frame,
             text="Character Backstory",
-            bg='#f0f0f0',
-            fg='#333333',
-            font=('Helvetica', 10, 'bold')
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
+            font=FONT_SMALL
         )
         backstory_title.pack(pady=(10, 5), padx=10, anchor='w')
         
         backstory_subtitle = tk.Label(
             panel_frame,
             text="(How to play this character)",
-            bg='#f0f0f0',
-            fg='#666666',
-            font=('Helvetica', 8, 'italic')
+            bg=BG_BLACK,
+            fg=FG_GREEN_DIM,
+            font=("Courier New", 8, "italic"),
         )
         backstory_subtitle.pack(pady=(0, 5), padx=10, anchor='w')
         
@@ -140,11 +203,14 @@ class ChatWindow:
             panel_frame,
             wrap=tk.WORD,
             height=10,
-            font=('Helvetica', 9),
-            bg='white',
-            fg='#333333',
+            font=FONT_SMALL,
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
             relief=tk.SUNKEN,
             borderwidth=1,
+            highlightthickness=1,
+            highlightbackground=FG_GREEN_BRIGHT,
+            highlightcolor=FG_GREEN_BRIGHT,
             state=tk.DISABLED,
             padx=5,
             pady=5
@@ -162,19 +228,15 @@ class ChatWindow:
         # Add buttons for all current characters
         for char_name in self.characters:
             if char_name not in self.character_buttons:
-                btn = tk.Button(
+                btn = self._create_button(
                     self.character_buttons_container,
                     text=char_name,
                     command=lambda name=char_name: self._select_character(name),
-                    bg='white',
-                    fg='#333333',
-                    font=('Helvetica', 10),
-                    relief=tk.RAISED,
-                    padx=10,
-                    pady=8,
-                    cursor='hand2',
-                    wraplength=160
+                    wraplength=160,
                 )
+                # Default base background for character buttons
+                btn.base_bg = BG_DARK
+                btn.config(bg=btn.base_bg)
                 btn.pack(fill=tk.X, padx=10, pady=5)
                 self.character_buttons[char_name] = btn
     
@@ -186,8 +248,8 @@ class ChatWindow:
             
             # Assign color if not already assigned
             if name not in self.colors:
-                # Generate a color or use default colors cyclically
-                default_colors = ['#BBDEFB', '#C8E6C9', '#FFE0B2', '#F8BBD0', '#E1BEE7', '#FFCCBC']
+                # Generate a green shade cyclically for additional characters
+                default_colors = [FG_GREEN_BRIGHT, FG_GREEN_ALT1, FG_GREEN_ALT2, FG_GREEN_DIM]
                 color_index = (len(self.characters) - 1) % len(default_colors)
                 self.colors[name] = color or default_colors[color_index]
                 
@@ -195,7 +257,8 @@ class ChatWindow:
                 tag_name = f"bubble_{name}"
                 self.chat_display.tag_config(
                     tag_name,
-                    background=self.colors[name],
+                    foreground=self.colors[name],
+                    background=BG_BLACK,
                     spacing1=8,
                     spacing3=8,
                     lmargin1=15,
@@ -214,24 +277,24 @@ class ChatWindow:
     def _setup_ui(self):
         """Set up the UI components."""
         # Main container - horizontal split
-        main_container = tk.Frame(self.root, bg='white')
+        main_container = tk.Frame(self.root, bg=BG_BLACK)
         main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Left side - chat area
-        main_frame = tk.Frame(main_container, bg='white')
+        main_frame = tk.Frame(main_container, bg=BG_BLACK)
         main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Right side - character selection panel
         self._setup_character_panel(main_container)
         
         # Title
-        title_font = font.Font(family="Helvetica", size=16, weight="bold")
+        title_font = font.Font(family="Courier New", size=16, weight="bold")
         title_label = tk.Label(
             main_frame,
-            text="LOCKDOWN AT NEXUS LABS",
+            text=self.window_title_text,
             font=title_font,
-            bg='white',
-            fg='#333333'
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
         )
         title_label.pack(pady=(0, 10))
         
@@ -240,9 +303,15 @@ class ChatWindow:
             main_frame,
             wrap=tk.WORD,
             state=tk.DISABLED,
-            bg='white',
-            font=('Arial', 14),
-            relief=tk.FLAT,
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
+            insertbackground=FG_GREEN_BRIGHT,
+            font=FONT_MAIN,
+            relief=tk.SUNKEN,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=FG_GREEN_BRIGHT,
+            highlightcolor=FG_GREEN_BRIGHT,
             padx=10,
             pady=10
         )
@@ -253,7 +322,8 @@ class ChatWindow:
             tag_name = f"bubble_{speaker}"
             self.chat_display.tag_config(
                 tag_name,
-                background=color,
+                foreground=color,
+                background=BG_BLACK,
                 spacing1=8,
                 spacing3=8,
                 lmargin1=15,
@@ -265,79 +335,75 @@ class ChatWindow:
         # Speaker name tag (bold)
         self.chat_display.tag_config(
             'speaker_name',
-            font=('Arial', 14, 'bold'),
-            foreground='#1a1a1a'
+            font=("Courier New", 14, 'bold'),
+            foreground=FG_GREEN_BRIGHT,
         )
         
         # Narrator text style (italic)
         self.chat_display.tag_config(
             'narrator_text',
-            font=('Arial', 13, 'italic'),
-            foreground='#444444'
+            font=("Courier New", 13, 'italic'),
+            foreground=FG_GREEN_DIM,
         )
         
         # Bottom button frame
-        button_frame = tk.Frame(main_frame, bg='white')
+        button_frame = tk.Frame(main_frame, bg=BG_BLACK)
         button_frame.pack(fill=tk.X, pady=(10, 0))
         
         # Quit button
-        self.quit_button = tk.Button(
+        self.quit_button = self._create_button(
             button_frame,
             text="Quit Conversation",
             command=self._on_quit,
-            bg='#E57373',
-            fg='white',
-            font=('Helvetica', 11, 'bold'),
-            relief=tk.FLAT,
-            padx=20,
-            pady=10,
-            cursor='hand2'
         )
         self.quit_button.pack(side=tk.RIGHT)
         
         # Input frame for player dialogue
-        input_frame = tk.Frame(main_frame, bg='white')
+        input_frame = tk.Frame(main_frame, bg=BG_BLACK)
         input_frame.pack(fill=tk.X, pady=(10, 0))
         
         input_label = tk.Label(
             input_frame,
             text="Your dialogue:",
-            bg='white',
-            fg='#666666',
-            font=('Helvetica', 10)
+            bg=BG_BLACK,
+            fg=FG_GREEN_DIM,
+            font=FONT_SMALL,
         )
         input_label.pack(side=tk.LEFT, padx=(0, 5))
         
         self.dialogue_entry = tk.Entry(
             input_frame,
-            font=('Arial', 12),
+            font=FONT_MAIN,
             state=tk.DISABLED,
-            bg='#f5f5f5'
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
+            insertbackground=FG_GREEN_BRIGHT,
+            relief=tk.SUNKEN,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=FG_GREEN_BRIGHT,
+            highlightcolor=FG_GREEN_BRIGHT,
         )
         self.dialogue_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.dialogue_entry.bind('<Return>', self._on_dialogue_submit)
         
-        self.submit_button = tk.Button(
+        self.submit_button = self._create_button(
             input_frame,
             text="Speak",
             command=self._on_dialogue_submit,
-            bg='#4CAF50',
-            fg='white',
-            font=('Helvetica', 10, 'bold'),
-            state=tk.DISABLED,
-            relief=tk.FLAT,
-            padx=15,
-            cursor='hand2'
         )
+        # Start visually "disabled" until it's the player's turn
+        self.submit_button.base_bg = BG_DARK
+        self.submit_button.config(bg=self.submit_button.base_bg, fg=FG_GREEN_DIM)
         self.submit_button.pack(side=tk.LEFT)
         
         # Status label
         self.status_label = tk.Label(
             button_frame,
             text="AI conversation running...",
-            bg='white',
-            fg='#2196F3',
-            font=('Helvetica', 11, 'bold')
+            bg=BG_BLACK,
+            fg=FG_GREEN_BRIGHT,
+            font=FONT_SMALL,
         )
         self.status_label.pack(side=tk.LEFT)
     
@@ -466,23 +532,22 @@ class ChatWindow:
         # Update button styles
         for name, btn in self.character_buttons.items():
             if name == character_name:
-                btn.config(bg='#2196F3', fg='white', relief=tk.SUNKEN)
+                btn.base_bg = BG_DARK_ACTIVE
+                btn.config(bg=btn.base_bg, fg=FG_GREEN_BRIGHT, relief=tk.FLAT)
             else:
-                if name is None:
-                    btn.config(bg='#E0E0E0', fg='#333333', relief=tk.RAISED)
-                else:
-                    btn.config(bg='white', fg='#333333', relief=tk.RAISED)
+                btn.base_bg = BG_DARK
+                btn.config(bg=btn.base_bg, fg=FG_GREEN_BRIGHT, relief=tk.FLAT)
         
         # Update status
         if character_name:
             self.player_status_label.config(
                 text=f"Playing as:\n{character_name}",
-                fg='#2196F3'
+                fg=FG_GREEN_BRIGHT,
             )
         else:
             self.player_status_label.config(
                 text="Observer mode\n(AI plays all)",
-                fg='#999999'
+                fg=FG_GREEN_DIM,
             )
         
         # Update backstory display
@@ -512,10 +577,11 @@ class ChatWindow:
         self.player_input = dialogue
         self.waiting_for_player = False
         
-        # Clear and disable input
+        # Clear and visually disable input
         self.dialogue_entry.delete(0, tk.END)
-        self.dialogue_entry.config(state=tk.DISABLED, bg='#f5f5f5')
-        self.submit_button.config(state=tk.DISABLED)
+        self.dialogue_entry.config(state=tk.DISABLED, bg=BG_BLACK)
+        self.submit_button.base_bg = BG_DARK
+        self.submit_button.config(bg=self.submit_button.base_bg, fg=FG_GREEN_DIM)
         self.update_status("Processing...")
     
     def _on_space_pressed(self, event=None):
@@ -552,8 +618,9 @@ class ChatWindow:
         self.waiting_for_player = True
         self.player_input = None
         
-        self.dialogue_entry.config(state=tk.NORMAL, bg='white')
-        self.submit_button.config(state=tk.NORMAL)
+        self.dialogue_entry.config(state=tk.NORMAL, bg=BG_BLACK)
+        self.submit_button.base_bg = BG_BLACK
+        self.submit_button.config(bg=self.submit_button.base_bg, fg=FG_GREEN_BRIGHT)
         self.dialogue_entry.focus()
         self.update_status(f"Your turn as {character_name}! Type your dialogue...")
     

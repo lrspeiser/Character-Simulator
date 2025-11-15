@@ -228,36 +228,35 @@ class Narrator:
             logger.info(f"Narrator initialized with guide: {guide_file}")
         else:
             logger.info("Narrator initialized in dynamic story mode")
-    
     def generate_story_setup(self, story_prompt: str) -> dict:
-        """
-        Generate initial story setup from a user prompt.
-        
+        """Generate initial story setup from a user prompt.
+
         Args:
             story_prompt: User's description of the story they want
-            
+
         Returns:
-            Dict with 'opening_scene', 'characters' list (each with 'name' and 'backstory')
+            Dict with 'title', 'opening_scene', 'characters' list (each with 'name' and 'backstory')
         """
         logger.info(f"Generating story setup from prompt: {story_prompt}")
-        
+
         system_prompt = (
-            "You are a master storyteller and narrator. Given a story concept, create an engaging opening scene "
-            "and define 2-4 initial characters with detailed backstories.\n\n"
+            "You are a master storyteller and narrator. Given a story concept, create an evocative story title, "
+            "an engaging opening scene, and 2-4 initial characters with detailed backstories.\n\n"
             "CRITICAL: Each character's backstory is ONLY what THAT character knows. NEVER include information "
             "about other characters' secrets, hidden motivations, or things this character doesn't know. "
             "The backstory is the character's internal knowledge and perspective ONLY.\n\n"
-            "RESPOND WITH JSON in this exact format:\n"
-            '{"opening_scene": "A vivid 2-3 paragraph opening that sets the scene, introduces the situation, '
+            "RESPOND WITH JSON in this exact format (no extra fields, no prose):\n"
+            '{"title": "Short, evocative story title (e.g. \\"Lockdown at Nexus Labs\\")",\n'
+            ' "opening_scene": "A vivid 2-3 paragraph opening that sets the scene, introduces the situation, '
             'and creates tension or intrigue.",\n'
-            '"characters": [\n'
-            '  {"name": "Character Name", "backstory": "WHO THIS CHARACTER IS: their role, personality, '
+            ' "characters": [\n'
+            '   {"name": "Character Name", "backstory": "WHO THIS CHARACTER IS: their role, personality, '
             'speaking style, background.\\n\\nWHAT THIS CHARACTER KNOWS: facts, observations, suspicions they have. '
             'ONLY information this specific character would know.\\n\\nWHAT THIS CHARACTER WANTS: their goals, '
             'motivations, desires.\\n\\nTHIS CHARACTER\'S SECRET: something they\'re hiding, if any. '
-            '3-5 paragraphs total."},\n'
-            '  {"name": "Character Name 2", "backstory": "..."}\n'
-            ']}\n\n'
+            '3-5 paragraphs total.", "voice_search": "Simple tag for desired voice, one of: male, female, young male, young female, child female"},\n'
+            '   {"name": "Character Name 2", "backstory": "...", "voice_search": "..."}\n'
+            ' ]}\n\n'
             "Guidelines for backstories:\n"
             "- Write each backstory from THAT character's perspective only\n"
             "- NEVER write \"what they don't know is...\" followed by plot secrets\n"
@@ -266,6 +265,12 @@ class Narrator:
             "- DO include: what they've personally witnessed or been told\n"
             "- DON'T include: omniscient narrator knowledge or other characters' secrets\n"
             "- Make each character's knowledge asymmetric - they know different things\n\n"
+            "Guidelines for voice_search (for Text-to-Speech):\n"
+            "- Provide a SIMPLE TAG ONLY from this list: male, female, young male, young female, child female\n"
+            "- For boy or teenage male characters, use 'young male' (do NOT use 'child male')\n"
+            "- For clearly childlike girls, use 'child female'; otherwise use 'young female' or 'female'\n"
+            "- Do NOT include extra descriptive words (no 'gravelly', 'scientist', 'detective', ages, etc.)\n"
+            "- This tag will be used to search ElevenLabs voices; do not mention specific voice IDs\n\n"
             "Guidelines for opening scene:\n"
             "- Opening scene should be vivid, cinematic, and create immediate engagement\n"
             "- Create natural conflict or tension between characters\n"
@@ -276,26 +281,36 @@ class Narrator:
             '"Detective Marsh is investigating the murder. He suspects the victim knew their killer. '
             'He noticed Dr. Chen seemed nervous during questioning." ✓'
         )
-        
+
         try:
             response = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=[{"role": "user", "content": f"Story concept: {story_prompt}"}],
                 max_tokens=3000,
                 stream=False,
-                assistant_prefill='{"opening_scene": "'
+                assistant_prefill='{"title": "'
             )
-            
+
             # Parse JSON response
             try:
                 setup = json.loads(response)
-                logger.info(f"Generated story with {len(setup.get('characters', []))} characters")
-                return setup
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse story setup JSON: {e}")
                 logger.error(f"Response: {response[:500]}")
                 raise ValueError("Narrator failed to generate valid story setup")
-                
+
+            title = (setup.get("title") or "").strip()
+            if not title:
+                logger.error(f"Story setup JSON missing non-empty 'title'. Raw response: {str(setup)[:500]}")
+                raise ValueError("Narrator failed to generate story title")
+
+            logger.info(
+                "Generated story '%s' with %d characters",
+                title,
+                len(setup.get("characters", [])),
+            )
+            return setup
+
         except Exception as e:
             logger.error(f"Error generating story setup: {e}")
             raise
@@ -592,16 +607,26 @@ class Narrator:
 class Conversation:
     """Manages the overall conversation simulation."""
     
-    def __init__(self, characters: List[Character], narrator: Narrator, opening_scene: str, client: ClaudeClient, gui_window=None):
-        """
-        Initialize conversation.
-        
+    def __init__(
+        self,
+        characters: List[Character],
+        narrator: Narrator,
+        opening_scene: str,
+        client: ClaudeClient,
+        gui_window=None,
+        tts_client=None,
+        character_voice_map: Optional[Dict[str, str]] = None,
+    ):
+        """Initialize conversation.
+
         Args:
             characters: List of all characters
             narrator: Narrator instance
             opening_scene: Opening situation/prompt
             client: Claude API client for token counting
             gui_window: Optional GUI window for display
+            tts_client: Optional ElevenLabsTTS instance for audio playback
+            character_voice_map: Optional mapping of character name -> ElevenLabs voice_id
         """
         self.characters = characters
         self.narrator = narrator
@@ -610,6 +635,8 @@ class Conversation:
         self.client = client
         self.quit_requested = False
         self.gui = gui_window
+        self.tts = tts_client
+        self.character_voice_map = character_voice_map or {}
         self.last_speaker_name = None  # Track who spoke last
         self.last_turn_was_player = False  # Track if previous turn was player-controlled
         
@@ -649,6 +676,14 @@ class Conversation:
             print("=" * 80)
             print(f"\n{self.opening_scene}\n")
             print("\n[Type 'Q' and press Enter at any time to quit]\n")
+
+        # Send opening scene to TTS narrator if enabled
+        if self.tts:
+            try:
+                logger.info("Sending opening scene to TTS narrator (%d chars)", len(self.opening_scene))
+                self.tts.speak_narrator(self.opening_scene)
+            except Exception as e:
+                logger.error(f"Error sending opening scene to TTS: {e}")
         
         # Add opening scene to history
         self.history.append({
@@ -709,6 +744,14 @@ class Conversation:
                         self.gui.end_streaming_message()
                     else:
                         print(f"\n[{scene_desc}]\n")
+
+                    # Send scene description to TTS narrator if enabled
+                    if self.tts:
+                        try:
+                            logger.info("Sending scene description to TTS narrator (%d chars)", len(scene_desc))
+                            self.tts.speak_narrator(scene_desc)
+                        except Exception as e:
+                            logger.error(f"Error sending scene description to TTS: {e}")
                     
                     # Add scene description to history
                     self.history.append({
@@ -741,6 +784,9 @@ class Conversation:
                         print(f"\n[Director suggestions for {speaker.name}:]")
                         print(suggestions_text)
                         print()
+
+                    # NOTE: We intentionally do NOT send director suggestions to TTS.
+                    # These are tips for the human player, not part of the story audio.
                     
                     # Add suggestions to history so other LLMs can use them
                     self.history.append({
@@ -783,6 +829,30 @@ class Conversation:
                 content = f"{speaker.name}: {dialogue} [behavior: {behavior}]"
             else:
                 content = f"{speaker.name}: {dialogue}"
+
+            # Send character dialogue to TTS if enabled
+            if self.tts and dialogue:
+                try:
+                    voice_id = self.character_voice_map.get(speaker.name)
+                    if not voice_id:
+                        # Visible fallback: log and use narrator voice so the character is still audible.
+                        logger.warning(
+                            "No ElevenLabs voice_id for character '%s'; using narrator voice for TTS",
+                            speaker.name,
+                        )
+                        voice_id = getattr(self.tts, "narrator_voice_id", None)
+                    else:
+                        logger.info(
+                            "Using ElevenLabs voice_id=%s for character '%s'",
+                            voice_id,
+                            speaker.name,
+                        )
+
+                    if voice_id:
+                        logger.info("Sending character '%s' dialogue to TTS (%d chars)", speaker.name, len(dialogue))
+                        self.tts.speak_character(speaker.name, voice_id, dialogue)
+                except Exception as e:
+                    logger.error(f"Error sending character dialogue to TTS for {speaker.name}: {e}")
             
             self.history.append({
                 "role": "assistant",

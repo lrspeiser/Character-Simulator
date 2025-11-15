@@ -1,5 +1,8 @@
 # Nexus Labs Lockdown Scenario Configuration
 
+# Human-readable title for this scenario (used for window title and header)
+title: "Lockdown at Nexus Labs"
+
 # Model to use (latest Claude)
 model: claude-sonnet-4-20250514
 
@@ -19,13 +22,21 @@ opening_scene: |
 # Narrator guide file
 narrator_guide: NARRATOR_GUIDE.txt
 
+# ElevenLabs TTS configuration (optional - requires ELEVENLABS_API_KEY in .env)
+tts_config:
+  enabled: true  # Set to false to disable TTS
+  auto_create_voices: false  # If true, automatically creates new voices when none found
+
 # Character definitions (using backstory files)
 characters:
   - name: Dr. Sarah Chen
     backstory_file: CHARACTER_1_BACKSTORY.txt
+    voice_description: "Professional female scientist, mid-30s, American accent, anxious but controlled tone, speaks with technical precision and underlying worry"
   
   - name: Marcus Webb
     backstory_file: CHARACTER_2_BACKSTORY.txt
+    voice_description: "Authoritative male security chief, deep gravelly voice, mid-40s, American accent, commanding but defensive tone when questioned"
   
   - name: Victoria Reeves
     backstory_file: CHARACTER_3_BACKSTORY.txt
+    voice_description: "Corporate female executive, smooth calculated voice, mid-50s, American accent, calm and manipulative undertones with sharp articulation"

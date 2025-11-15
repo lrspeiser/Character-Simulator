@@ -43,6 +43,9 @@ def main():
     
     # Load configuration
     config = load_config(config_path)
+
+    # Derive window title for GUI mode
+    window_title = config.get("title", "Book Character Conversation")
     
     # Set logging level based on config (quiet mode for GUI)
     if config.get("use_gui", True) and not config.get("verbose", False):
@@ -54,9 +57,32 @@ def main():
     # Initialize Claude client
     model = config.get("model", "claude-sonnet-4-20250514")
     client = ClaudeClient(model=model)
+
+    # Initialize ElevenLabs TTS (optional - requires ELEVENLABS_API_KEY)
+    from .tts_elevenlabs import ElevenLabsTTS
+    tts_client = None
+    tts_config = config.get("tts_config", {})
+    tts_enabled = tts_config.get("enabled", False)
+    auto_create_voices = tts_config.get("auto_create_voices", False)
     
-    # Create characters from backstory files
+    try:
+        if tts_enabled and os.getenv("ELEVENLABS_API_KEY"):
+            # See README.md ("ElevenLabs TTS") for setup details
+            logger.info("ELEVENLABS_API_KEY detected and TTS enabled; initializing ElevenLabs TTS client")
+            tts_client = ElevenLabsTTS()
+            logger.info("ElevenLabs TTS initialized (auto_create_voices=%s)", auto_create_voices)
+        elif tts_enabled:
+            logger.warning("TTS enabled in config but ELEVENLABS_API_KEY not set; TTS will be disabled")
+        else:
+            logger.info("TTS disabled in config")
+    except Exception as e:
+        logger.error(f"Failed to initialize ElevenLabs TTS: {e}")
+        tts_client = None
+    
+    # Create characters from backstory files and resolve voice IDs
     characters = []
+    character_voice_map = {}
+    
     for char_config in config["characters"]:
         backstory_file = char_config["backstory_file"]
         # Make path relative to config directory if not absolute
@@ -71,6 +97,21 @@ def main():
             backstory_file=backstory_file
         )
         characters.append(character)
+        
+        # Resolve voice for this character if TTS is enabled
+        if tts_client and "voice_description" in char_config:
+            voice_desc = char_config["voice_description"]
+            logger.info("Resolving voice for '%s' using description: %s", character.name, voice_desc[:100])
+            voice_id = tts_client.find_or_create_voice(
+                character_name=character.name,
+                voice_description=voice_desc,
+                auto_create=auto_create_voices
+            )
+            if voice_id:
+                logger.info("Mapped '%s' to voice_id=%s", character.name, voice_id)
+                character_voice_map[character.name] = voice_id
+            else:
+                logger.warning("No voice_id resolved for '%s'", character.name)
     
     # Create narrator with guide file
     narrator_guide = config["narrator_guide"]
@@ -99,6 +140,7 @@ def main():
         
         # Create GUI window with character selection and backstories
         gui = ChatWindow(
+            title=window_title,
             characters=character_names,
             character_backstories=character_backstories
         )
@@ -109,7 +151,9 @@ def main():
             narrator=narrator,
             opening_scene=opening_scene,
             client=client,
-            gui_window=gui
+            gui_window=gui,
+            tts_client=tts_client,
+            character_voice_map=character_voice_map,
         )
         
         # Run conversation in separate thread with error handling
@@ -141,7 +185,10 @@ def main():
             characters=characters,
             narrator=narrator,
             opening_scene=opening_scene,
-            client=client
+            client=client,
+            gui_window=None,
+            tts_client=tts_client,
+            character_voice_map=character_voice_map,
         )
         
         conversation.start(max_turns=max_turns)
