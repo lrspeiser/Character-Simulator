@@ -509,9 +509,9 @@ class ElevenLabsTTS:
         try:
             if sys.platform == "darwin":
                 # macOS: afplay is the built-in CLI audio player
-                # Reduce character volume relative to narrator to balance mixing
+                # Narrator is louder, character voices are quieter for balance
                 if label == "narrator":
-                    volume = "1.0"
+                    volume = "2.0"  # 2x volume for narrator
                 elif label.startswith("character:"):
                     volume = "0.3"  # Lower volume for character voices
                 else:

@@ -774,27 +774,23 @@ class Conversation:
                 suggestions = self.narrator.generate_player_suggestions(self.history, speaker.name)
                 
                 if suggestions:
-                    suggestions_text = "\n".join([f"• {s}" for s in suggestions])
+                    # Pick the first/best suggestion as the hint
+                    hint_text = suggestions[0] if suggestions else "Continue the conversation naturally."
                     
-                    # Display suggestions as narrator bubble (italic gray)
+                    # Display collapsible hint link in GUI
                     if self.gui:
-                        self.gui.start_streaming_message('narrator', is_narrator=True)
-                        for char in suggestions_text:
-                            self.gui.stream_text(char)
-                        self.gui.end_streaming_message()
+                        self.gui.show_hint_link(speaker.name, hint_text)
                     else:
-                        # CLI mode: print suggestions with clear prefix
-                        print(f"\n[Director suggestions for {speaker.name}:]")
-                        print(suggestions_text)
-                        print()
+                        # CLI mode: print hint with clear prefix
+                        print(f"\n[Hint for {speaker.name}: {hint_text}]\n")
 
-                    # NOTE: We intentionally do NOT send director suggestions to TTS.
+                    # NOTE: We intentionally do NOT send hints to TTS.
                     # These are tips for the human player, not part of the story audio.
                     
-                    # Add suggestions to history so other LLMs can use them
+                    # Add hint to history so other LLMs can use it
                     self.history.append({
                         "role": "user",
-                        "content": f"[Director notes for {speaker.name}: {suggestions_text}]"
+                        "content": f"[Hint for {speaker.name}: {hint_text}]"
                     })
             
             # Character responds

@@ -298,7 +298,7 @@ class ChatWindow:
         )
         title_label.pack(pady=(0, 10))
         
-        # Chat display area (scrollable)
+        # Chat display area (scrollable, with text selection enabled)
         self.chat_display = scrolledtext.ScrolledText(
             main_frame,
             wrap=tk.WORD,
@@ -313,9 +313,15 @@ class ChatWindow:
             highlightbackground=FG_GREEN_BRIGHT,
             highlightcolor=FG_GREEN_BRIGHT,
             padx=10,
-            pady=10
+            pady=10,
+            exportselection=True,  # Enable copy-paste
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True)
+        
+        # Bind events to enable text selection even when disabled
+        self.chat_display.bind("<Button-1>", lambda e: "break")  # Allow selection
+        self.chat_display.bind("<B1-Motion>", lambda e: "break")  # Allow drag selection
+        self.chat_display.bind("<ButtonRelease-1>", lambda e: "break")  # Allow release
         
         # Configure tags for different speaker colors
         for speaker, color in self.colors.items():
@@ -344,6 +350,23 @@ class ChatWindow:
             'narrator_text',
             font=("Courier New", 13, 'italic'),
             foreground=FG_GREEN_DIM,
+        )
+        
+        # Hint link style (clickable, underlined)
+        self.chat_display.tag_config(
+            'hint_link',
+            font=("Courier New", 12, 'italic', 'underline'),
+            foreground=FG_GREEN_ALT1,
+        )
+        self.chat_display.tag_bind('hint_link', '<Button-1>', self._on_hint_click)
+        self.chat_display.tag_bind('hint_link', '<Enter>', lambda e: self.chat_display.config(cursor="hand2"))
+        self.chat_display.tag_bind('hint_link', '<Leave>', lambda e: self.chat_display.config(cursor=""))
+        
+        # Hint text style (revealed hint)
+        self.chat_display.tag_config(
+            'hint_revealed',
+            font=("Courier New", 12, 'italic'),
+            foreground=FG_GREEN_BRIGHT,
         )
         
         # Bottom button frame
@@ -442,9 +465,9 @@ class ChatWindow:
         
         self.chat_display.config(state=tk.NORMAL)
         
-        # Add spacing between bubbles
+        # Add consistent spacing between all bubbles
         if self.chat_display.index('end-1c') != '1.0':
-            self.chat_display.insert(tk.END, '\n\n')
+            self.chat_display.insert(tk.END, '\n')
         
         # Store starting position
         self.current_bubble_start = self.chat_display.index('end-1c')
@@ -524,6 +547,71 @@ class ChatWindow:
     def update_status(self, text: str):
         """Update the status label."""
         self.message_queue.put(('status', {'text': text}))
+    
+    def show_hint_link(self, character_name: str, hint_text: str):
+        """Show a collapsible hint link that reveals the hint when clicked.
+        
+        Args:
+            character_name: Name of the character
+            hint_text: The hint text to reveal
+        """
+        self.chat_display.config(state=tk.NORMAL)
+        
+        # Add spacing before hint
+        if self.chat_display.index('end-1c') != '1.0':
+            self.chat_display.insert(tk.END, '\n')
+        
+        # Store hint text for this link
+        hint_id = f"hint_{id(hint_text)}"
+        if not hasattr(self, '_hints'):
+            self._hints = {}
+        self._hints[hint_id] = hint_text
+        
+        # Insert clickable link
+        link_text = f"[Ask for a hint]"
+        start_pos = self.chat_display.index('end-1c')
+        self.chat_display.insert(tk.END, link_text, (hint_id, 'hint_link'))
+        end_pos = self.chat_display.index('end-1c')
+        
+        # Add newline after link
+        self.chat_display.insert(tk.END, '\n')
+        
+        self.chat_display.config(state=tk.DISABLED)
+        self.chat_display.see(tk.END)
+    
+    def _on_hint_click(self, event):
+        """Handle hint link click - reveal the hint text."""
+        # Get the tag name at click position
+        index = self.chat_display.index(f"@{event.x},{event.y}")
+        tags = self.chat_display.tag_names(index)
+        
+        # Find hint_id tag
+        hint_id = None
+        for tag in tags:
+            if tag.startswith('hint_'):
+                hint_id = tag
+                break
+        
+        if not hint_id or not hasattr(self, '_hints') or hint_id not in self._hints:
+            return
+        
+        hint_text = self._hints[hint_id]
+        
+        # Find the range of the link
+        ranges = self.chat_display.tag_ranges(hint_id)
+        if not ranges:
+            return
+        
+        start, end = ranges[0], ranges[1]
+        
+        # Replace link with revealed hint
+        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.delete(start, end)
+        self.chat_display.insert(start, f"Hint: {hint_text}", 'hint_revealed')
+        self.chat_display.config(state=tk.DISABLED)
+        
+        # Clean up stored hint
+        del self._hints[hint_id]
     
     def _select_character(self, character_name):
         """Handle character selection."""
