@@ -688,17 +688,17 @@ class Conversation:
             try:
                 logger.info("Sending opening scene to TTS narrator (%d chars)", len(self.opening_scene))
                 # Display text when audio starts playing
-                def display_opening():
+                def display_opening(text):
                     if self.gui:
-                        self.gui.add_message('narrator', self.opening_scene, is_narrator=True)
+                        self.gui.add_message('narrator', text, is_narrator=True)
                     else:
                         print("\n" + "=" * 80)
                         print("LOCKDOWN AT NEXUS LABS")
                         print("=" * 80)
-                        print(f"\n{self.opening_scene}\n")
+                        print(f"\n{text}\n")
                         print("\n[Type 'Q' and press Enter at any time to quit]\n")
                 
-                self.tts.speak_narrator(self.opening_scene, display_callback=lambda text: display_opening())
+                self.tts.speak_narrator(self.opening_scene, display_callback=display_opening)
             except Exception as e:
                 logger.error(f"Error sending opening scene to TTS: {e}")
         else:
@@ -771,16 +771,16 @@ class Conversation:
                         if self.tts:
                             try:
                                 # Display text when audio starts playing
-                                def display_situation():
+                                def display_situation(text):
                                     if self.gui:
                                         self.gui.start_streaming_message('narrator', is_narrator=True)
-                                        for char in new_situation:
+                                        for char in text:
                                             self.gui.stream_text(char)
                                         self.gui.end_streaming_message()
                                     else:
-                                        print(f"\n[{new_situation}]\n")
+                                        print(f"\n[{text}]\n")
                                 
-                                self.tts.speak_narrator(new_situation, display_callback=lambda text: display_situation())
+                                self.tts.speak_narrator(new_situation, display_callback=display_situation)
                             except Exception as e:
                                 logger.error(f"Error sending situation to TTS: {e}")
                         else:
@@ -852,17 +852,17 @@ class Conversation:
                         try:
                             logger.info("Sending scene description to TTS narrator (%d chars)", len(scene_desc))
                             # Display text when audio starts playing
-                            def display_scene():
+                            def display_scene(text):
                                 if self.gui:
                                     self.gui.start_streaming_message('narrator', is_narrator=True)
                                     # Stream the scene description
-                                    for char in scene_desc:
+                                    for char in text:
                                         self.gui.stream_text(char)
                                     self.gui.end_streaming_message()
                                 else:
-                                    print(f"\n[{scene_desc}]\n")
+                                    print(f"\n[{text}]\n")
                             
-                            self.tts.speak_narrator(scene_desc, display_callback=lambda text: display_scene())
+                            self.tts.speak_narrator(scene_desc, display_callback=display_scene)
                         except Exception as e:
                             logger.error(f"Error sending scene description to TTS: {e}")
                     else:
@@ -981,10 +981,10 @@ class Conversation:
                         
                         # Display text when audio starts playing (if not player turn)
                         if not is_player_turn and self.gui:
-                            def display_dialogue():
-                                self.gui.add_message(speaker.name, dialogue, is_narrator=False)
+                            def display_dialogue(text):
+                                self.gui.add_message(speaker.name, text, is_narrator=False)
                             
-                            self.tts.speak_character(speaker.name, voice_id, dialogue, display_callback=lambda text: display_dialogue())
+                            self.tts.speak_character(speaker.name, voice_id, dialogue, display_callback=display_dialogue)
                         else:
                             # Player turn or CLI mode - no callback needed (already displayed)
                             self.tts.speak_character(speaker.name, voice_id, dialogue)
