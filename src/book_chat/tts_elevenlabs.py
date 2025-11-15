@@ -154,12 +154,27 @@ class ElevenLabsTTS:
         # Step 1: Design voice and get generated_voice_id
         design_url = "https://api.elevenlabs.io/v1/text-to-voice/design"
         headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
+        
+        # Extract gender from description if present (for better matching)
+        # ElevenLabs API may support explicit gender parameter
+        gender = None
+        desc_lower = voice_description.lower()
+        if desc_lower.startswith('female') or 'female' in desc_lower[:20]:
+            gender = 'female'
+        elif desc_lower.startswith('male') or 'male' in desc_lower[:20]:
+            gender = 'male'
+        
         design_payload = {
             "voice_description": voice_description,
             "auto_generate_text": True,  # Let ElevenLabs generate suitable text
             "loudness": 0.5,  # Default loudness
-            "guidance_scale": 5.0,  # Default guidance
+            "guidance_scale": 5.0,  # Default guidance (higher = more adherence to description)
         }
+        
+        # Add gender if detected (some ElevenLabs endpoints support this)
+        if gender:
+            design_payload["gender"] = gender
+            logger.info("Detected gender '%s' from description, adding to payload", gender)
         
         try:
             logger.info("Designing voice with ElevenLabs for '%s': %s", voice_name, voice_description[:100])
@@ -172,13 +187,21 @@ class ElevenLabsTTS:
                 logger.error("No voice previews returned from ElevenLabs design API")
                 return None
             
+            # Log all previews so we can see what ElevenLabs generated
+            logger.info("ElevenLabs returned %d voice previews for '%s'", len(previews), voice_name)
+            for i, preview in enumerate(previews):
+                preview_id = preview.get("generated_voice_id", "unknown")
+                # Log the preview metadata if available
+                logger.info("  Preview %d: generated_voice_id=%s", i+1, preview_id)
+            
             # Use the first preview's generated_voice_id
+            # TODO: In the future, we could play all previews and let the user choose
             generated_voice_id = previews[0].get("generated_voice_id")
             if not generated_voice_id:
                 logger.error("No generated_voice_id in preview response")
                 return None
             
-            logger.info("Voice designed successfully (generated_voice_id=%s)", generated_voice_id)
+            logger.info("Using preview 1 (generated_voice_id=%s) for voice creation", generated_voice_id)
             
             # Step 2: Create the voice using generated_voice_id
             create_url = "https://api.elevenlabs.io/v1/text-to-voice"
