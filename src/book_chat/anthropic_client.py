@@ -53,7 +53,8 @@ class ClaudeClient:
         stream: bool = False,
         prefix: Optional[str] = None,
         stream_callback: Optional[callable] = None,
-        assistant_prefill: Optional[str] = None
+        assistant_prefill: Optional[str] = None,
+        output_format: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Send a message to Claude and return the response.
@@ -66,6 +67,9 @@ class ClaudeClient:
             prefix: Optional prefix to print before streaming (e.g., character name)
             stream_callback: Optional callback function for streaming text to GUI
             assistant_prefill: Optional prefill text for assistant response (forces format)
+            output_format: Optional structured output schema (Claude 4.5+ feature)
+                          Format: {"type": "json_schema", "schema": {JSON Schema dict}}
+                          Requires anthropic-beta: structured-outputs-2025-11-13 header
             
         Returns:
             Claude's response text (includes prefill if provided)
@@ -78,6 +82,7 @@ class ClaudeClient:
         logger.debug(f"Max tokens: {max_tokens}")
         logger.debug(f"Streaming: {stream}")
         logger.debug(f"Assistant prefill: {assistant_prefill}")
+        logger.debug(f"Structured output: {bool(output_format)}")
         
         # Add assistant prefill if provided
         if assistant_prefill:
@@ -131,12 +136,36 @@ class ClaudeClient:
                 
             else:
                 # Non-streaming mode (for decision-making)
-                response = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    system=system_prompt,
-                    messages=messages
-                )
+                api_kwargs = {
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "system": system_prompt,
+                    "messages": messages
+                }
+                
+                # Add structured output format if provided (Claude 4.5+ feature)
+                # NOTE:
+                #   The current anthropic Python client in this project does NOT
+                #   accept an `output_format` keyword on messages.create(), which
+                #   previously caused runtime errors like:
+                #       Messages.create() got an unexpected keyword argument 'output_format'
+                #   This, in turn, forced our narrator logic to fall back to the
+                #   first character, making it feel like it "always" came back
+                #   to the player.
+                #
+                #   To keep the app running correctly, we CURRENTLY ignore the
+                #   `output_format` schema at the transport layer and rely on the
+                #   system prompt instructions to produce JSON. Callers still
+                #   pass `output_format` so we can re-enable true structured
+                #   outputs later once the client/library supports it.
+                if output_format:
+                    logger.warning(
+                        "Structured output schema was provided, but 'output_format' "
+                        "is not passed to anthropic.messages.create() in this build. "
+                        "Relying on prompt-only JSON formatting instead."
+                    )
+                
+                response = self.client.messages.create(**api_kwargs)
                 
                 logger.debug("RESPONSE RECEIVED")
                 logger.debug(f"Response ID: {response.id}")

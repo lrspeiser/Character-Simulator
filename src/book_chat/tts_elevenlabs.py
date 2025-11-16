@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import queue
-import re
 import subprocess
 import sys
 import tempfile
@@ -105,6 +104,18 @@ class ElevenLabsTTS:
         label = f"character:{character_name}"
         logger.info("Queueing character TTS for %s (voice_id=%s, %d chars)", character_name, voice_id, len(text))
         self._enqueue(voice_id, text, label=label, display_callback=display_callback)
+    
+    def wait_for_queue(self) -> None:
+        """Block until all queued TTS tasks have finished playing."""
+        logger.debug("Waiting for TTS queue to complete...")
+        self._task_queue.join()
+        logger.debug("TTS queue completed")
+    
+    def wait_for_queue(self) -> None:
+        """Block until all queued TTS tasks have finished playing."""
+        logger.debug("Waiting for TTS queue to complete...")
+        self._task_queue.join()
+        logger.debug("TTS queue completed")
     
     def preview_voice(self, voice_id: str, character_name: str) -> None:
         """Play a short preview of the voice immediately (not queued).
@@ -236,83 +247,47 @@ class ElevenLabsTTS:
             return None
     
     def find_or_create_voice(self, character_name: str, voice_description: str, auto_create: bool = False) -> Optional[str]:
-        """Find an existing voice or create a new one using ElevenLabs Text-to-Voice API.
-        
-        This method first tries to find an existing voice using the search API.
-        If auto_create is True and no voice is found, it will design and create a new voice.
-        
+        """Create a new ElevenLabs voice from a text description.
+
+        IMPORTANT:
+            In this project we do **not** browse or search the ElevenLabs
+            public voice library when resolving character voices. Instead,
+            we always create a custom voice from the provided description.
+
         Args:
-            character_name: Name of the character (used as voice name if creating)
-            voice_description: Description for voice search/creation (20-1000 chars for creation)
-            auto_create: If True, create a new voice when search finds nothing (default: False)
-        
+            character_name: Name of the character (used as the ElevenLabs voice name).
+            voice_description: Detailed description used to design the voice
+                (must be 20-1000 characters; see design_and_create_voice).
+            auto_create: When True, actually create the voice. When False,
+                this method returns None and does not attempt any search.
+
         Returns:
-            A voice_id (existing or newly created), or None if not found and creation disabled/failed.
+            The created voice_id, or None if creation is disabled or fails.
         """
-        # First, try to find an existing voice
-        voice_id = self.find_voice_id(voice_description)
-        if voice_id:
-            return voice_id
-        
-        # If not found and auto_create is enabled, design and create a new voice
-        if auto_create:
-            logger.info(
-                "No existing voice found for '%s'; creating new voice with description: %s",
-                character_name,
-                voice_description[:100],
+        character_name = (character_name or "").strip()
+        voice_description = (voice_description or "").strip()
+
+        if not voice_description:
+            logger.error(
+                "find_or_create_voice called without voice_description for '%s'",
+                character_name or "<unknown>",
             )
-            return self.design_and_create_voice(character_name, voice_description)
-        
-        # Otherwise, fall back to the existing fallback logic
-        logger.info("No voice found for '%s' and auto_create=False; using fallback", character_name)
-        return self._pick_fallback_voice(voice_description)
-    
-    def find_voice_id(self, search: str) -> Optional[str]:
-        """Find a voice ID using ElevenLabs /v2/voices search.
-
-        Args:
-            search: Search query describing the desired voice (e.g. "gravelly detective, male, mid-40s").
-
-        Returns:
-            The first matching voice_id, or None if none found.
-        """
-        search = (search or "").strip()
-        if not search:
             return None
 
-        url = "https://api.elevenlabs.io/v2/voices"
-        headers = {"xi-api-key": self.api_key}
-        params = {
-            "search": search,
-            "page_size": 1,
-        }
-
-        try:
-            logger.info("Searching ElevenLabs voices for query: %s", search)
-            resp = self.session.get(url, headers=headers, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            voices = data.get("voices", []) or []
-            logger.info("ElevenLabs /v2/voices returned %d candidates for query '%s'", len(voices), search)
-            if not voices:
-                logger.warning("No ElevenLabs voices matched search '%s'", search)
-                # Fall back to any available voice
-                return self._pick_fallback_voice(search)
-
-            voice_id = voices[0].get("voice_id")
-            if voice_id == self.narrator_voice_id:
-                logger.info(
-                    "Search for '%s' returned narrator voice_id=%s; using fallback voice instead",
-                    search,
-                    voice_id,
-                )
-                return self._pick_fallback_voice(search)
-
-            logger.info("ElevenLabs voice match for '%s': %s", search, voice_id)
-            return voice_id
-        except Exception as e:
-            logger.error("Error searching ElevenLabs voices for '%s': %s", search, e)
+        if not auto_create:
+            logger.info(
+                "find_or_create_voice called with auto_create=False for '%s'; "
+                "voice library search is disabled, returning None.",
+                character_name or "<unknown>",
+            )
             return None
+
+        logger.info(
+            "Creating ElevenLabs voice for '%s' from description: %s",
+            character_name or "<unknown>",
+            voice_description[:100],
+        )
+        return self.design_and_create_voice(character_name, voice_description)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -320,105 +295,6 @@ class ElevenLabsTTS:
     def _enqueue(self, voice_id: str, text: str, label: str, display_callback=None) -> None:
         logger.debug("Enqueuing TTS task label=%s voice_id=%s length=%d", label, voice_id, len(text))
         self._task_queue.put((voice_id, text, label, display_callback))
-
-    def _load_fallback_voice_ids(self) -> None:
-        """Load and cache all available ElevenLabs voices for fallback mapping.
-
-        Called when search-based lookup finds no matches. This ensures characters
-        can still be assigned distinct voices even if voice_search hints don't
-        match anything in the account's voice library.
-        """
-        if self._fallback_voices:
-            return
-
-        url = "https://api.elevenlabs.io/v1/voices"
-        headers = {"xi-api-key": self.api_key}
-        try:
-            logger.info("Loading all ElevenLabs voices for fallback mapping")
-            resp = self.session.get(url, headers=headers, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            voices = data.get("voices", []) or []
-            self._fallback_voices = voices
-            logger.info("Loaded %d ElevenLabs voices for fallback mapping", len(voices))
-        except Exception as e:
-            logger.error("Error loading fallback ElevenLabs voices: %s", e)
-            self._fallback_voices = []
-
-    def _pick_fallback_voice(self, search: str) -> Optional[str]:
-        """Pick a fallback voice_id when search-based lookup fails.
-
-        We try to pick a voice whose name/description/labels best match the
-        search hint (e.g. gender or style), and we round-robin so multiple
-        characters get different voices. All selections are logged.
-        """
-        self._load_fallback_voice_ids()
-        if not self._fallback_voices:
-            logger.warning(
-                "No ElevenLabs voices available for fallback mapping (search='%s')",
-                search,
-            )
-            return None
-
-        search_lower = (search or "").lower()
-        wants_male = any(tok in search_lower for tok in ["male", "man", "boy"])
-        wants_female = any(tok in search_lower for tok in ["female", "woman", "girl"])
-
-        def voice_text(v: dict) -> str:
-            name = (v.get("name") or "").lower()
-            desc = (v.get("description") or "").lower()
-            labels = v.get("labels") or {}
-            labels_text = " ".join(str(val).lower() for val in labels.values())
-            return f"{name} {desc} {labels_text}".strip()
-
-        # First pass: filter voices that obviously conflict with gender hints
-        filtered: list[dict] = []
-        for v in self._fallback_voices:
-            text = voice_text(v)
-            if wants_male and "female" in text:
-                continue
-            if wants_female and "male" in text:
-                continue
-            filtered.append(v)
-
-        candidates = filtered or self._fallback_voices
-
-        # Round-robin starting point based on index, but also lightly score by token overlap
-        tokens = [t for t in re.split(r"[\s,]+", search_lower) if t]
-
-        def score_voice(v: dict) -> int:
-            text = voice_text(v)
-            score = 0
-            for tkn in tokens:
-                if tkn and tkn in text:
-                    score += 1
-            # Tiny bonus if gender words align
-            if wants_male and "male" in text:
-                score += 2
-            if wants_female and "female" in text:
-                score += 2
-            return score
-
-        # Prefer non-narrator voices if possible
-        non_narrator = [v for v in candidates if v.get("voice_id") != self.narrator_voice_id]
-        candidates = non_narrator or candidates
-
-        # Sort by score descending but keep round-robin offset for variety
-        scored = sorted(candidates, key=score_voice, reverse=True)
-        if not scored:
-            return None
-
-        idx = self._fallback_index % len(scored)
-        self._fallback_index += 1
-        chosen = scored[idx]
-        voice_id = chosen.get("voice_id")
-        logger.warning(
-            "Falling back to ElevenLabs voice_id=%s (name='%s') for query '%s'",
-            voice_id,
-            chosen.get("name"),
-            search,
-        )
-        return voice_id
 
     def _worker_loop(self) -> None:
         logger.debug("ElevenLabsTTS worker loop started")

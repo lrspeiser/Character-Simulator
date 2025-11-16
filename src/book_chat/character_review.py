@@ -241,17 +241,38 @@ class CharacterReviewWindow:
             return
         
         char = self.characters_data[self.current_index]
+
+        # If no ElevenLabs voice_id is available, fail visibly instead of silently
+        voice_id = char.get('voice_id')
+        if not voice_id:
+            msg = (
+                f"No ElevenLabs voice available for {char['name']} yet. "
+                f"Voice creation may have failed (e.g., custom voice limit reached). "
+                f"Check the logs and your ElevenLabs account."
+            )
+            logger.error(msg)
+            self.status_label.config(text=msg)
+            return
+
         self.status_label.config(text=f"Playing preview for {char['name']}...")
         self.root.update()
         
         # Run preview in background thread so UI doesn't freeze
         def preview_thread():
             try:
-                self.tts_client.preview_voice(char['voice_id'], char['name'])
-                self.status_label.config(text="Preview complete")
+                self.tts_client.preview_voice(voice_id, char['name'])
+
+                # UI updates must run on the main Tk thread
+                def mark_complete():
+                    self.status_label.config(text="Preview complete")
+                self.root.after(0, mark_complete)
+
             except Exception as e:
                 logger.error(f"Error previewing voice: {e}")
-                self.status_label.config(text=f"Error: {str(e)}")
+
+                def mark_error():
+                    self.status_label.config(text=f"Error: {str(e)}")
+                self.root.after(0, mark_error)
         
         threading.Thread(target=preview_thread, daemon=True).start()
     
@@ -280,23 +301,35 @@ class CharacterReviewWindow:
                     voice_name=f"{char['name']} (v2)",
                     voice_description=char['voice_description']
                 )
-                
+
                 if new_voice_id:
                     char['voice_id'] = new_voice_id
-                    self.status_label.config(text="Voice regenerated! Preview or accept.")
+
+                    def on_success():
+                        self.status_label.config(text="Voice regenerated! Preview or accept.")
                     logger.info(f"New voice_id for {char['name']}: {new_voice_id}")
+                    self.root.after(0, on_success)
                 else:
-                    self.status_label.config(text="Failed to generate new voice")
+                    def on_fail():
+                        self.status_label.config(text="Failed to generate new voice")
                     logger.error(f"Voice regeneration failed for {char['name']}")
+                    self.root.after(0, on_fail)
+
             except Exception as e:
                 logger.error(f"Error regenerating voice: {e}")
-                self.status_label.config(text=f"Error: {str(e)}")
+
+                def on_error():
+                    self.status_label.config(text=f"Error: {str(e)}")
+                self.root.after(0, on_error)
+
             finally:
-                # Re-enable buttons
-                self.preview_button['state'] = tk.NORMAL
-                self.regenerate_button['state'] = tk.NORMAL
-                self.accept_button['state'] = tk.NORMAL
-                self.is_generating = False
+                # Re-enable buttons and reset state on the main thread
+                def on_done():
+                    self.preview_button['state'] = tk.NORMAL
+                    self.regenerate_button['state'] = tk.NORMAL
+                    self.accept_button['state'] = tk.NORMAL
+                    self.is_generating = False
+                self.root.after(0, on_done)
         
         threading.Thread(target=regenerate_thread, daemon=True).start()
     

@@ -17,16 +17,51 @@ MAX_HISTORY_TOKENS = 20000
 
 
 def parse_json_response(response: str, fallback_key: str = None) -> dict:
-    """Parse JSON response with fallback to plain text."""
+    """Parse JSON response with verbose logging and optional fallback.
+
+    This helper is deliberately strict:
+    - First, it tries to parse the full response as JSON.
+    - If that fails, it tries to parse ONLY the first line (to handle
+      patterns like '{"foo": 1}' followed by extra text).
+    - If both attempts fail, it returns a fallback dict and logs loudly.
+
+    Args:
+        response: Raw text returned by the LLM.
+        fallback_key: Optional key to use when response is not valid JSON.
+
+    Returns:
+        Parsed dict if JSON is valid; otherwise a dict with either
+        {fallback_key: raw_text} or {"text": raw_text}.
+    """
+    raw_preview = (response or "").strip()
+    logger.debug(f"parse_json_response raw: {raw_preview[:500]}")
+
+    # First attempt: full string
     try:
-        # Try to parse as JSON
-        data = json.loads(response.strip())
+        data = json.loads(raw_preview)
+        logger.debug(f"parse_json_response parsed full JSON: {data}")
         return data
-    except json.JSONDecodeError:
-        # If not JSON, return as fallback key
-        if fallback_key:
-            return {fallback_key: response.strip()}
-        return {"text": response.strip()}
+    except json.JSONDecodeError as e_full:
+        logger.error(f"parse_json_response full JSONDecodeError: {e_full}")
+
+    # Second attempt: first line only (handles JSON + extra prose)
+    first_line = raw_preview.splitlines()[0].strip() if raw_preview else ""
+    if first_line and first_line != raw_preview:
+        try:
+            data = json.loads(first_line)
+            logger.debug(f"parse_json_response parsed first-line JSON: {data}")
+            return data
+        except json.JSONDecodeError as e_line:
+            logger.error(f"parse_json_response first-line JSONDecodeError: {e_line}")
+
+    # Fallback: return raw text under a single key
+    logger.error(f"parse_json_response could not parse raw response as JSON: {raw_preview[:500]}")
+    if fallback_key:
+        fallback = {fallback_key: raw_preview}
+    else:
+        fallback = {"text": raw_preview}
+    logger.warning(f"parse_json_response returning fallback dict: {fallback}")
+    return fallback
 
 
 class Character:
@@ -86,35 +121,65 @@ class Character:
         )
     
     def wants_to_respond(self, conversation_history: List[Dict[str, str]]) -> bool:
-        """
-        Determine if this character wants to respond to the current conversation state.
-        
-        Args:
-            conversation_history: List of conversation messages
-            
-        Returns:
-            True if character wants to respond
+        """Determine if this character wants to respond.
+
+        This method now *requires* a JSON response from the LLM to avoid
+        misinterpretation. The expected format is:
+
+            {"wants_to_respond": true}
+
+        If JSON parsing fails or the key is missing, we log the error and
+        default to False (safest behavior: character stays silent).
         """
         logger.debug(f"Checking if {self.name} wants to respond...")
-        
+
+        # JSON schema for the response (for future structured-output support)
+        output_schema = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "wants_to_respond": {"type": "boolean"}
+                },
+                "required": ["wants_to_respond"],
+                "additionalProperties": False,
+            },
+        }
+
         system_prompt = (
             f"You are {self.name}.\n\n"
-            f"Given the conversation so far, do you want to respond? "
-            f"Answer with ONLY 'YES' or 'NO' based on whether you have something meaningful to say."
+            f"Given the conversation so far, decide if you genuinely want to respond "
+            f"right now. Respond ONLY with a JSON object in this exact format:\n\n"
+            f'{{"wants_to_respond": true}} or {{"wants_to_respond": false}}.\n\n'
+            f"You should answer true only if you have something meaningful to add "
+            f"based on what was just said."
         )
-        
+
         try:
-            response = self.client.send_message(
+            raw = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
-                max_tokens=50,  # Increased from 10 to give more breathing room for YES/NO responses
-                stream=False
+                max_tokens=50,
+                stream=False,
+                output_format=output_schema,
             )
-            
-            wants_to = response.strip().upper().startswith("YES")
-            logger.info(f"{self.name} wants to respond: {wants_to}")
+
+            logger.debug(f"wants_to_respond raw JSON: {raw}")
+            parsed = parse_json_response(raw, fallback_key="wants_to_respond")
+            value = parsed.get("wants_to_respond")
+            if isinstance(value, bool):
+                wants_to = value
+            else:
+                logger.error(
+                    "wants_to_respond value is not boolean for %s: %r. "
+                    "Defaulting to False.",
+                    self.name,
+                    value,
+                )
+                wants_to = False
+            logger.info(f"{self.name} wants to respond (JSON): {wants_to}")
             return wants_to
-            
+
         except Exception as e:
             logger.error(f"Error checking if {self.name} wants to respond: {e}")
             return False
@@ -326,91 +391,150 @@ class Narrator:
         characters: List[Character],
         conversation_history: List[Dict[str, str]]
     ) -> Character:
-        """
-        Choose which character should speak next.
-        
+        """Choose which character should speak next.
+
+        IMPORTANT:
+            The purpose of this method is to avoid any ambiguity about who
+            should speak. We therefore require the LLM to respond with strict
+            JSON and we parse that JSON before deciding the next speaker.
+
+            If JSON parsing fails or the chosen name does not match any of the
+            candidate characters, we log the error loudly and (after a small
+            number of retries) fall back to the first character as an explicit
+           , visible failure mode.
+
         Args:
             characters: List of characters who want to respond
             conversation_history: Conversation so far
-            
+
         Returns:
-            The chosen character
+            The chosen character (never None if characters is non-empty)
         """
         if len(characters) == 0:
             logger.warning("No characters want to respond")
             return None
-        
+
         if len(characters) == 1:
             logger.info(f"Only one character wants to respond: {characters[0].name}")
             return characters[0]
-        
+
         logger.info(f"Multiple characters want to respond: {[c.name for c in characters]}")
-        
-        # Ask narrator to choose
+
         character_names = [c.name for c in characters]
+
+        # Define the JSON schema we expect from Claude
+        output_schema = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "next_speaker": {
+                        "type": "string",
+                        "description": (
+                            "The name of the next speaker. Must be exactly one of: "
+                            + ", ".join(character_names)
+                        ),
+                    }
+                },
+                "required": ["next_speaker"],
+                "additionalProperties": False,
+            },
+        }
+
+        # System prompt enforcing JSON-only output
         system_prompt = (
-            f"The following characters want to speak: {', '.join(character_names)}\n\n"
-            f"Who should speak next based on dramatic tension and story flow?\n\n"
-            f"FORMAT: Respond with JSON in this exact format:\n\n"
-            f"CORRECT examples:\n"
-            f'✓ {{"next_speaker": "Dr. Sarah Chen"}}\n'
-            f'✓ {{"next_speaker": "Marcus Webb"}}\n'
-            f'✓ {{"next_speaker": "Victoria Reeves"}}\n\n'
-            f"WRONG examples:\n"
-            f'✗ {{"next_speaker": "Marcus Webb: He should go next"}}\n'
-            f'✗ {{"next_speaker": "I think Dr. Sarah Chen"}}\n'
-            f'✗ Dr. Sarah Chen\n\n'
-            f"The next_speaker value must be EXACTLY one of: {', '.join(character_names)}"
+            "You are the narrator deciding who should speak next in a multi-"\
+            "character conversation.\n\n"
+            f"The following characters want to speak: {', '.join(character_names)}.\n\n"
+            "Choose the ONE character whose turn it should be based on dramatic "
+            "tension and story flow.\n\n"
+            "CRITICAL OUTPUT RULES:\n"
+            "- Respond with ONLY a JSON object.\n"
+            "- Use this exact format: {\"next_speaker\": \"<exact name from the list>\"}.\n"
+            "- The value of next_speaker MUST be exactly one of the names in "
+            "the list above. No extra keys, no extra text."
         )
-        
-        try:
-            choice = self.client.send_message(
-                system_prompt=system_prompt,
-                messages=conversation_history,
-                max_tokens=50,
-                stream=False,
-                assistant_prefill='{"next_speaker": "'
-            )
-            
-            logger.info(f"Narrator choice raw response: {choice}")
-            
-            # Parse JSON response (prefilled with {"next_speaker": ")
+
+        # We allow a small number of retries to get valid JSON before falling back
+        max_attempts = 2
+
+        for attempt in range(1, max_attempts + 1):
             try:
-                parsed = json.loads(choice)
-                choice_name = parsed.get("next_speaker", "").strip()
-                logger.info(f"Parsed next_speaker: '{choice_name}'")
-            except json.JSONDecodeError as e:
-                # Fallback: extract name from response
-                logger.error(f"JSON parse error in narrator choice: {e}")
-                logger.error(f"Raw choice response: {choice}")
-                choice_name = choice.strip().strip('"}')
-                logger.info(f"Fallback extracted name: '{choice_name}'")
-            
-            # Find matching character (exact match first)
-            logger.info(f"Attempting to match choice_name='{choice_name}' against characters: {[c.name for c in characters]}")
-            
-            for character in characters:
-                if character.name.lower() == choice_name.lower():
-                    logger.info(f"✓ Narrator chose (exact match): {character.name}")
-                    return character
-            
-            # Try partial match
-            logger.warning(f"No exact match for '{choice_name}', trying partial match")
-            for character in characters:
-                if character.name.lower() in choice_name.lower() or choice_name.lower() in character.name.lower():
-                    logger.warning(f"✓ Narrator chose (partial match): {character.name} (from choice '{choice_name}')")
-                    return character
-            
-            # Default to first if no match
-            logger.error(f"✗ FALLBACK: Narrator choice '{choice_name}' didn't match any character!")
-            logger.error(f"Available characters were: {[c.name for c in characters]}")
-            logger.error(f"Defaulting to first character: {characters[0].name}")
-            return characters[0]
-            
-        except Exception as e:
-            logger.error(f"Error in narrator choice: {e}")
-            logger.info(f"Defaulting to first character: {characters[0].name}")
-            return characters[0]
+                raw_choice = self.client.send_message(
+                    system_prompt=system_prompt,
+                    messages=conversation_history,
+                    max_tokens=100,
+                    stream=False,
+                    output_format=output_schema,
+                )
+
+                logger.info(f"Narrator choice attempt {attempt}: {raw_choice}")
+
+                # Parse JSON response
+                try:
+                    parsed = json.loads(raw_choice)
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        "JSON parse error in narrator choice attempt %d: %s. Raw response: %s",
+                        attempt,
+                        e,
+                        raw_choice,
+                    )
+                    continue
+
+                choice_name = (parsed.get("next_speaker") or "").strip()
+                if not choice_name:
+                    logger.error(
+                        "Narrator choice attempt %d returned JSON without 'next_speaker': %s",
+                        attempt,
+                        parsed,
+                    )
+                    continue
+
+                logger.info(f"Parsed next_speaker (attempt {attempt}): '{choice_name}'")
+
+                # Exact match first
+                for character in characters:
+                    if character.name.lower() == choice_name.lower():
+                        logger.info(f"✓ Narrator chose (exact match): {character.name}")
+                        return character
+
+                # Try partial match if exact fails
+                logger.warning(
+                    "No exact match for narrator choice '%s' on attempt %d, trying partial match",
+                    choice_name,
+                    attempt,
+                )
+                for character in characters:
+                    if character.name.lower() in choice_name.lower() or choice_name.lower() in character.name.lower():
+                        logger.warning(
+                            "✓ Narrator chose (partial match): %s (from '%s')",
+                            character.name,
+                            choice_name,
+                        )
+                        return character
+
+                logger.error(
+                    "Narrator choice '%s' did not match any candidates on attempt %d. Candidates: %s",
+                    choice_name,
+                    attempt,
+                    character_names,
+                )
+
+            except Exception as e:
+                logger.error(
+                    "Error in narrator choice attempt %d: %s",
+                    attempt,
+                    e,
+                )
+
+        # If we reach here, all attempts failed to produce a valid, matchable JSON answer
+        logger.error(
+            "✗ FALLBACK: All narrator choice attempts failed to produce valid JSON matching a character. "
+            "Defaulting to first character: %s",
+            characters[0].name,
+        )
+        return characters[0]
     
     def generate_player_suggestions(self, conversation_history: List[Dict[str, str]], character_name: str) -> list:
         """
@@ -441,57 +565,49 @@ class Narrator:
             f"- What was just said by other characters\n"
             f"- The character's personality and situation\n"
             f"- Dramatic tension and story flow\n\n"
-            f"FORMAT: Respond with strict JSON only (no prose, no markdown, no code fences):\n\n"
-            f"CORRECT examples:\n"
-            f'✓ {{"suggestions": ["Feeling: Anxious about the lockdown implications", '
-            f'"Intent: Press for more details about what triggered this", '
-            f'"Angle: Ask who has access to the system logs"]}}\n'
-            f'✓ {{"suggestions": ["Emotional state: Defensive and suspicious", '
-            f'"Goal: Shift focus away from yourself", '
-            f'"Sample: Challenge their authority or question their timeline"]}}\n\n'
-            f"WRONG examples:\n"
-            f'✗ Here are some suggestions: {{"suggestions": [...]}}\n'
-            f'✗ ```json\\n{{"suggestions": [...]}}```\n'
-            f'✗ {{"suggestions": "feeling anxious"}}\n\n'
             f"Provide 3-5 brief, actionable suggestions that help the player embody {character_name}."
         )
+        
+        # Define structured output schema for guaranteed valid JSON
+        output_schema = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "suggestions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "3-5 brief suggestions for the player",
+                        "minItems": 3,
+                        "maxItems": 5
+                    }
+                },
+                "required": ["suggestions"],
+                "additionalProperties": False
+            }
+        }
         
         try:
             logger.debug(f"Director suggestions system prompt: {system_prompt[:300]}...")
             
-            # Call Claude with JSON prefill to enforce format
-            # Per project rules: no temperature parameter
-            # See https://docs.anthropic.com/claude/reference/messages_post
-            response = self.client.send_message(
+            # Call Claude with structured outputs (guaranteed valid JSON)
+            response_json = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
                 max_tokens=300,
                 stream=False,
-                assistant_prefill='{"suggestions": ["'
+                output_format=output_schema
             )
             
-            logger.debug(f"Director suggestions raw response: {response}")
+            logger.debug(f"Director suggestions (structured output): {response_json}")
             
-            # Parse JSON response (prefilled with {"suggestions": [")
-            try:
-                parsed = json.loads(response)
-                suggestions = parsed.get("suggestions", [])
-                
-                if not isinstance(suggestions, list):
-                    logger.error(f"Suggestions field is not a list: {suggestions}")
-                    return []
-                
-                logger.info(f"Generated {len(suggestions)} suggestions for {character_name}")
-                logger.debug(f"Suggestions: {suggestions}")
-                return suggestions
-                
-            except json.JSONDecodeError as e:
-                # Log the error verbosely but don't crash
-                logger.error(f"Failed to parse director suggestions JSON: {e}")
-                logger.error(f"Raw response was: {response[:500]}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return []  # Return empty list - caller will skip display
+            # Parse JSON response (guaranteed valid by structured outputs)
+            parsed = json.loads(response_json)
+            suggestions = parsed.get("suggestions", [])
+            
+            logger.info(f"Generated {len(suggestions)} suggestions for {character_name}")
+            logger.debug(f"Suggestions: {suggestions}")
+            return suggestions
                 
         except Exception as e:
             # Log all errors verbosely per project rules
@@ -513,33 +629,58 @@ class Narrator:
             Scene description (or empty string if none needed)
         """
         logger.info("Checking if scene description needed...")
-        
-        # First, ask if narration is needed
+
+        # First, ask if narration is needed (JSON-only)
+        decision_schema = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "needs_narration": {"type": "boolean"}
+                },
+                "required": ["needs_narration"],
+                "additionalProperties": False,
+            },
+        }
+
         decision_prompt = (
             f"{self.guide}\n\n"
             f"{last_speaker} just spoke.\n\n"
-            f"Does the scene need narration right now? Answer YES only if:\n"
+            f"Decide if the scene needs narration *right now*. Respond ONLY with a JSON object "
+            f"in this exact format: {{\"needs_narration\": true}} or {{\"needs_narration\": false}}.\n\n"
+            f"Set needs_narration=true only if:\n"
             f"- Something important happens physically (actions, reactions, movement)\n"
             f"- The environment changes (sounds, lights, atmosphere shifts)\n"
-            f"- There's a dramatic moment that needs description\n\n"
-            f"Answer NO if the dialogue flows naturally to the next speaker without needing description.\n\n"
-            f"Answer ONLY with YES or NO."
+            f"- There's a dramatic moment that needs description.\n\n"
+            f"Set needs_narration=false if the dialogue flows naturally to the next speaker "
+            f"without needing extra description."
         )
-        
+
         try:
-            decision = self.client.send_message(
+            decision_raw = self.client.send_message(
                 system_prompt=decision_prompt,
                 messages=conversation_history,
-                max_tokens=50,  # Increased from 10
-                stream=False
+                max_tokens=50,
+                stream=False,
+                output_format=decision_schema,
             )
-            
-            needs_narration = decision.strip().upper().startswith("YES")
+
+            logger.debug(f"Narration decision raw JSON: {decision_raw}")
+            parsed_decision = parse_json_response(decision_raw, fallback_key="needs_narration")
+            value = parsed_decision.get("needs_narration")
+            if isinstance(value, bool):
+                needs_narration = value
+            else:
+                logger.error(
+                    "needs_narration value is not boolean: %r. Defaulting to False.",
+                    value,
+                )
+                needs_narration = False
             logger.info(f"Narration needed: {needs_narration}")
-            
+
             if not needs_narration:
                 return ""
-            
+
         except Exception as e:
             logger.error(f"Error checking narration need: {e}")
             return ""
@@ -569,48 +710,37 @@ class Narrator:
             f"- Environmental details (sounds, lighting, atmosphere)\n"
             f"- Tension, mood shifts, or dramatic moments\n"
             f"- Reactions from other characters\n\n"
-            f"FORMAT: Respond with JSON in this exact format:\n\n"
-            f"CORRECT examples:\n"
-            f'✓ {{"scene": "Webb\'s hand moves to his holster. The lights flicker."}}\n'
-            f'✓ {{"scene": "The ventilation system groans overhead. Chen\'s eyes dart upward nervously."}}\n'
-            f'✓ {{"scene": "Chen\'s voice cracks as she speaks, her fingers tightening around her phone. Reeves leans forward slightly."}}\n\n'
-            f"WRONG examples:\n"
-            f'✗ {{"scene": "Webb says, We need to talk."}}\n'
-            f'✗ {{"scene": "Marcus Webb: thinking about the situation"}}\n'
-            f'✗ Webb\'s hand moves to his holster.\n\n'
-            f"Keep it vivid, cinematic, and concise. Only narrate - never speak as any character."
+            f"Keep it vivid, cinematic, and concise (1-2 sentences). Only narrate - never speak as any character."
         )
         
+        # Define structured output schema for guaranteed valid JSON
+        output_schema = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "scene": {
+                        "type": "string",
+                        "description": "1-2 sentences describing the scene. NO character dialogue, NO character names with colons."
+                    }
+                },
+                "required": ["scene"],
+                "additionalProperties": False
+            }
+        }
+        
         try:
-            description = self.client.send_message(
+            description_json = self.client.send_message(
                 system_prompt=system_prompt,
                 messages=conversation_history,
                 max_tokens=200,
-                stream=False,  # Get full response to parse JSON first
-                assistant_prefill='{"scene": "'
+                stream=False,
+                output_format=output_schema
             )
             
-            # Parse JSON response (prefilled with {"scene": ")
-            try:
-                parsed = json.loads(description)
-                scene_text = parsed.get("scene", "")
-            except json.JSONDecodeError:
-                # Fallback: extract scene from response
-                logger.warning(f"JSON parse error in narrator scene: {description[:200]}")
-                # Try to extract text between quotes
-                if '"scene":' in description:
-                    try:
-                        start = description.find('"scene":') + len('"scene":')
-                        rest = description[start:].strip()
-                        if rest.startswith('"'):
-                            end = rest.find('"', 1)
-                            scene_text = rest[1:end] if end != -1 else rest[1:]
-                        else:
-                            scene_text = description
-                    except Exception:
-                        scene_text = description
-                else:
-                    scene_text = description
+            # Parse JSON response (guaranteed valid by structured outputs)
+            parsed = json.loads(description_json)
+            scene_text = parsed.get("scene", "")
             
             logger.info(f"Narrator description: {scene_text}")
             return scene_text
@@ -699,6 +829,7 @@ class Conversation:
                         print("\n[Type 'Q' and press Enter at any time to quit]\n")
                 
                 self.tts.speak_narrator(self.opening_scene, display_callback=display_opening)
+                self.tts.wait_for_queue()  # Wait for audio to finish
             except Exception as e:
                 logger.error(f"Error sending opening scene to TTS: {e}")
         else:
@@ -743,28 +874,48 @@ class Conversation:
                 
                 # Narrator creates a new situation/event to re-engage characters
                 situation_prompt = (
-                    f"{self.narrator.guide if self.narrator.guide else ''}\n\n"
+                    f"{self.narrator.guide if self.narrator.guide else ''}\\n\\n"
                     f"The characters have gone silent. As the narrator, create a NEW SITUATION or EVENT "
-                    f"that changes the environment and demands a response.\n\n"
-                    f"Examples of situation changes:\n"
-                    f"- A sudden sound, alarm, or system malfunction\n"
-                    f"- Discovery of new evidence or information\n"
-                    f"- Environmental change (lights flicker, door opens, temperature drops)\n"
-                    f"- Time passing with a visible consequence\n"
-                    f"- External interruption or communication\n\n"
-                    f"Keep it 2-3 sentences. Make it dramatic and impossible to ignore.\n"
-                    f"Do NOT include character dialogue - only describe what happens."
+                    f"that changes the environment and demands a response.\\n\\n"
+                    f"Examples of situation changes:\\n"
+                    f"- A sudden sound, alarm, or system malfunction\\n"
+                    f"- Discovery of new evidence or information\\n"
+                    f"- Environmental change (lights flicker, door opens, temperature drops)\\n"
+                    f"- Time passing with a visible consequence\\n"
+                    f"- External interruption or communication\\n\\n"
+                    f"Keep it 2-3 sentences. Make it dramatic and impossible to ignore.\\n"
+                    f"Do NOT include character dialogue - only describe what happens.\\n\\n"
+                    "CRITICAL: Respond ONLY with a JSON object in this exact format: {\"situation\": \"<description>\"}."
                 )
-                
+
+                situation_schema = {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "situation": {
+                                "type": "string",
+                                "description": "2-3 sentence description of the new situation/event",
+                            }
+                        },
+                        "required": ["situation"],
+                        "additionalProperties": False,
+                    },
+                }
+
                 try:
-                    new_situation = self.client.send_message(
+                    new_situation_raw = self.client.send_message(
                         system_prompt=situation_prompt,
                         messages=self.history,
                         max_tokens=200,
-                        stream=False
+                        stream=False,
+                        output_format=situation_schema,
                     )
+
+                    parsed_situation = parse_json_response(new_situation_raw, fallback_key="situation")
+                    new_situation = (parsed_situation.get("situation") or "").strip()
                     
-                    if new_situation and new_situation.strip():
+                    if new_situation:
                         logger.info(f"Narrator created new situation: {new_situation[:100]}...")
                         
                         # Display the new situation
@@ -781,6 +932,7 @@ class Conversation:
                                         print(f"\n[{text}]\n")
                                 
                                 self.tts.speak_narrator(new_situation, display_callback=display_situation)
+                                self.tts.wait_for_queue()  # Wait for audio to finish
                             except Exception as e:
                                 logger.error(f"Error sending situation to TTS: {e}")
                         else:
@@ -863,6 +1015,7 @@ class Conversation:
                                     print(f"\n[{text}]\n")
                             
                             self.tts.speak_narrator(scene_desc, display_callback=display_scene)
+                            self.tts.wait_for_queue()  # Wait for audio to finish
                         except Exception as e:
                             logger.error(f"Error sending scene description to TTS: {e}")
                     else:
@@ -981,13 +1134,15 @@ class Conversation:
                         
                         # Display text when audio starts playing (if not player turn)
                         if not is_player_turn and self.gui:
-                            def display_dialogue(text):
-                                self.gui.add_message(speaker.name, text, is_narrator=False)
+                            def display_dialogue(text, char_name=speaker.name):
+                                self.gui.add_message(char_name, text, is_narrator=False)
                             
                             self.tts.speak_character(speaker.name, voice_id, dialogue, display_callback=display_dialogue)
+                            self.tts.wait_for_queue()  # Wait for audio to finish
                         else:
                             # Player turn or CLI mode - no callback needed (already displayed)
                             self.tts.speak_character(speaker.name, voice_id, dialogue)
+                            self.tts.wait_for_queue()  # Wait for audio to finish
                 except Exception as e:
                     logger.error(f"Error sending character dialogue to TTS for {speaker.name}: {e}")
             
